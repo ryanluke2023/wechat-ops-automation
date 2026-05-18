@@ -6,12 +6,16 @@
     "dev": "next dev --turbopack",
     "dev:keepalive": "node scripts/dev-server.cjs",
     "build": "next build --turbopack",
+    "db:generate": "prisma generate",
+    "db:push": "prisma db push",
     "start": "next start",
     "lint": "next lint"
   },
   "dependencies": {
+    "@prisma/client": "^6.19.3",
     "lucide-react": "^0.468.0",
     "next": "^15.5.7",
+    "prisma": "^6.19.3",
     "react": "^19.2.4",
     "react-dom": "^19.2.4"
   },
