@@ -17,6 +17,7 @@ import {
   Trash2
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { clientDb } from "@/lib/client-db";
 import { weeklyPlanMock } from "@/lib/mock-generators";
 import {
   ArticleResult,
@@ -109,12 +110,44 @@ function stringifyContent(value: unknown) {
   return JSON.stringify(value, null, 2);
 }
 
+function articleToMarkdown(article: ArticleResult) {
+  return [
+    `# ${article.title}`,
+    "",
+    `> ${article.subtitle}`,
+    "",
+    article.opening,
+    "",
+    ...article.sections.flatMap((section) => [
+      `## ${section.heading}`,
+      "",
+      section.body,
+      "",
+      `**案例 / 数据点：** ${section.evidence}`,
+      ""
+    ]),
+    "## 金句",
+    "",
+    ...article.quotes.map((quote) => `- ${quote}`),
+    "",
+    "## 结尾总结",
+    "",
+    article.conclusion,
+    "",
+    "## 引导话术",
+    "",
+    article.cta
+  ].join("\n");
+}
+
 export default function Home() {
   const [active, setActive] = useState<SectionKey>("topics");
   const [loading, setLoading] = useState<string | null>(null);
   const [toast, setToast] = useState("");
   const [modelMode, setModelMode] = useState<ModelMode>("economy");
   const [history, setHistory] = useState<string[]>([]);
+  const [editorContent, setEditorContent] = useState("");
+  const [draftSavedAt, setDraftSavedAt] = useState("");
 
   const [topicForm, setTopicForm] = useState({
     domain: "AI、财经、科技",
@@ -160,25 +193,37 @@ export default function Home() {
   }, [library, query]);
 
   useEffect(() => {
-    const savedCalendar = localStorage.getItem("wechat-ops-calendar");
-    const savedLibrary = localStorage.getItem("wechat-ops-library");
-    const savedHistory = localStorage.getItem("wechat-ops-history");
-    if (savedCalendar) setCalendar(JSON.parse(savedCalendar));
-    if (savedLibrary) setLibrary(JSON.parse(savedLibrary));
-    if (savedHistory) setHistory(JSON.parse(savedHistory));
+    async function loadDatabase() {
+      setCalendar(await clientDb.read("calendar", defaultCalendar));
+      setLibrary(await clientDb.read("library", defaultLibrary));
+      setHistory(await clientDb.read("history", []));
+      const drafts = await clientDb.read<{ content: string; savedAt: string }[]>("drafts", []);
+      if (drafts[0]) {
+        setEditorContent(drafts[0].content);
+        setDraftSavedAt(drafts[0].savedAt);
+      }
+    }
+    loadDatabase();
   }, []);
 
   useEffect(() => {
-    localStorage.setItem("wechat-ops-calendar", JSON.stringify(calendar));
+    clientDb.write("calendar", calendar);
   }, [calendar]);
 
   useEffect(() => {
-    localStorage.setItem("wechat-ops-library", JSON.stringify(library));
+    clientDb.write("library", library);
   }, [library]);
 
   useEffect(() => {
-    localStorage.setItem("wechat-ops-history", JSON.stringify(history));
+    clientDb.write("history", history);
   }, [history]);
+
+  useEffect(() => {
+    if (!editorContent) return;
+    const savedAt = new Date().toLocaleString("zh-CN");
+    setDraftSavedAt(savedAt);
+    clientDb.write("drafts", [{ content: editorContent, savedAt }]);
+  }, [editorContent]);
 
   function remember(text: string) {
     setHistory((items) => [text, ...items].slice(0, 8));
@@ -248,6 +293,7 @@ export default function Home() {
     try {
       const data = await postJson<ArticleResult>("/api/generate-article", { ...articleForm, modelMode });
       setArticleResult(data);
+      setEditorContent(articleToMarkdown(data));
       setActive("article");
       remember(`文章：${data.title}`);
     } finally {
@@ -283,6 +329,41 @@ export default function Home() {
       setPublishPackage(data);
       setActive("package");
       remember(`发布包：${articleForm.topic}`);
+    } finally {
+      setLoading(null);
+    }
+  }
+
+  async function runPipeline() {
+    setLoading("pipeline");
+    try {
+      const topic = await postJson<TopicResult>("/api/generate-topic", { ...topicForm, modelMode });
+      setTopicResult(topic);
+      const selectedTopic = topic.recommendations[0] || articleForm.topic;
+      const nextArticleForm = { ...articleForm, topic: selectedTopic };
+      setArticleForm(nextArticleForm);
+
+      const titles = await postJson<TitleResult[] | { data: TitleResult[] }>("/api/generate-title", {
+        topic: selectedTopic,
+        audience: nextArticleForm.audience,
+        modelMode
+      });
+      const titleList = Array.isArray(titles) ? titles : titles.data;
+      setTitleResult(titleList);
+
+      const article = await postJson<ArticleResult>("/api/generate-article", { ...nextArticleForm, modelMode });
+      setArticleResult(article);
+      setEditorContent(articleToMarkdown(article));
+
+      const pack = await postJson<PublishPackage>("/api/generate-publish-package", {
+        article,
+        topic: selectedTopic,
+        modelMode
+      });
+      setPublishPackage(pack);
+      setActive("package");
+      remember(`流水线：${selectedTopic}`);
+      setToast("一键流水线已完成");
     } finally {
       setLoading(null);
     }
@@ -453,10 +534,29 @@ export default function Home() {
           {active === "article" && (
             <ResultPanel
               title="当前文章 / Editor"
-              actions={articleResult ? actionButtons(articleResult, "article-draft") : null}
+              actions={editorContent ? actionButtons(editorContent, "article-draft") : null}
               empty="在右侧设置文章参数，生成结构化初稿。"
             >
-              {articleResult && <ArticlePreview article={articleResult} addToLibrary={addToLibrary} />}
+              {(articleResult || editorContent) && (
+                <div className="editor-grid">
+                  <div className="editor-stack">
+                    <div className="row-between editor-meta">
+                      <span>Markdown 编辑器</span>
+                      <span>{draftSavedAt ? `已保存 ${draftSavedAt}` : "等待保存"}</span>
+                    </div>
+                    <textarea
+                      className="editor-area"
+                      value={editorContent}
+                      onChange={(event) => setEditorContent(event.target.value)}
+                    />
+                  </div>
+                  {articleResult ? (
+                    <ArticlePreview article={articleResult} addToLibrary={addToLibrary} />
+                  ) : (
+                    <ResultBlock title="编辑稿" content={editorContent} />
+                  )}
+                </div>
+              )}
             </ResultPanel>
           )}
 
@@ -613,6 +713,14 @@ export default function Home() {
           ))}
         </div>
         <p className="muted rail-hint">{activeMode.hint}</p>
+
+        <div className="rail-form">
+          <button className="btn primary" disabled={loading === "pipeline"} onClick={runPipeline}>
+            {loading === "pipeline" ? <Loader2 size={16} /> : <Sparkles size={16} />}
+            一键生成流水线
+          </button>
+          <span className="muted">自动完成：选题 → 标题 → 文章 → 发布包</span>
+        </div>
 
         {active === "topics" && (
           <div className="rail-form">

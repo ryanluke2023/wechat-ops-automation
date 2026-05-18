@@ -269,6 +269,16 @@ button {
   min-height: 620px;
 }
 
+.editor-stack {
+  display: grid;
+  gap: 10px;
+}
+
+.editor-meta {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .row-between {
   display: flex;
   align-items: center;
