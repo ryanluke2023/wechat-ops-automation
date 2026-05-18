@@ -5,6 +5,8 @@ import {
   BookOpen,
   CalendarDays,
   Clipboard,
+  Edit3,
+  Eye,
   FileDown,
   FileText,
   Layers,
@@ -12,11 +14,14 @@ import {
   Loader2,
   MessageSquareText,
   Plus,
+  Quote,
   Search,
+  Save,
   Sparkles,
-  Trash2
+  Trash2,
+  Wand2
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { clientDb } from "@/lib/client-db";
 import { weeklyPlanMock } from "@/lib/mock-generators";
 import {
@@ -33,6 +38,14 @@ import {
 } from "@/lib/types";
 
 type StudioTab = "topics" | "article" | "titles" | "package";
+type EditorMode = "edit" | "preview";
+type EditorAction = "rewrite-paragraph" | "rewrite-heading" | "extract-quotes" | "expand" | "compress" | "change-style";
+type DraftVersion = {
+  id: string;
+  title: string;
+  content: string;
+  createdAt: string;
+};
 
 const studioTabs: { key: StudioTab; label: string; icon: typeof Sparkles }[] = [
   { key: "topics", label: "选题", icon: Sparkles },
@@ -140,13 +153,31 @@ function articleToMarkdown(article: ArticleResult) {
   ].join("\n");
 }
 
+function extractDraftTitle(content: string) {
+  const heading = content.match(/^#\s+(.+)$/m)?.[1];
+  return (heading || content.split("\n").find(Boolean) || "未命名文章").slice(0, 42);
+}
+
+function findCurrentParagraph(content: string, cursor: number) {
+  const safeCursor = Math.max(0, Math.min(cursor, content.length));
+  let start = content.lastIndexOf("\n\n", safeCursor - 1);
+  start = start === -1 ? 0 : start + 2;
+  let end = content.indexOf("\n\n", safeCursor);
+  end = end === -1 ? content.length : end;
+  return { start, end, text: content.slice(start, end) };
+}
+
 export default function Home() {
+  const editorRef = useRef<HTMLTextAreaElement>(null);
   const [active, setActive] = useState<SectionKey>("topics");
   const [loading, setLoading] = useState<string | null>(null);
   const [toast, setToast] = useState("");
   const [modelMode, setModelMode] = useState<ModelMode>("economy");
   const [history, setHistory] = useState<string[]>([]);
   const [editorContent, setEditorContent] = useState("");
+  const [editorMode, setEditorMode] = useState<EditorMode>("edit");
+  const [selectedText, setSelectedText] = useState("");
+  const [draftVersions, setDraftVersions] = useState<DraftVersion[]>([]);
   const [draftSavedAt, setDraftSavedAt] = useState("");
 
   const [topicForm, setTopicForm] = useState({
@@ -197,6 +228,7 @@ export default function Home() {
       setCalendar(await clientDb.read("calendar", defaultCalendar));
       setLibrary(await clientDb.read("library", defaultLibrary));
       setHistory(await clientDb.read("history", []));
+      setDraftVersions(await clientDb.read("versions", []));
       const drafts = await clientDb.read<{ content: string; savedAt: string }[]>("drafts", []);
       if (drafts[0]) {
         setEditorContent(drafts[0].content);
@@ -219,6 +251,10 @@ export default function Home() {
   }, [history]);
 
   useEffect(() => {
+    clientDb.write("versions", draftVersions);
+  }, [draftVersions]);
+
+  useEffect(() => {
     if (!editorContent) return;
     const savedAt = new Date().toLocaleString("zh-CN");
     setDraftSavedAt(savedAt);
@@ -227,6 +263,89 @@ export default function Home() {
 
   function remember(text: string) {
     setHistory((items) => [text, ...items].slice(0, 8));
+  }
+
+  function saveDraftVersion(label = "手动保存", nextContent = editorContent) {
+    if (!nextContent.trim()) {
+      setToast("暂无可保存内容");
+      return;
+    }
+    const createdAt = new Date().toLocaleString("zh-CN");
+    setDraftVersions((items) =>
+      [
+        {
+          id: crypto.randomUUID(),
+          title: `${label} / ${extractDraftTitle(nextContent)}`,
+          content: nextContent,
+          createdAt
+        },
+        ...items
+      ].slice(0, 12)
+    );
+    setToast("版本已保存");
+  }
+
+  function updateSelection() {
+    const textarea = editorRef.current;
+    if (!textarea) return;
+    setSelectedText(editorContent.slice(textarea.selectionStart, textarea.selectionEnd).trim());
+  }
+
+  function applyEditorResult(result: string, action: EditorAction) {
+    const nextText = result.trim();
+    if (!nextText) return editorContent;
+
+    if (action === "extract-quotes") {
+      const nextContent = `${editorContent.trim()}\n\n## 金句提取\n\n${nextText}\n`;
+      setEditorContent(nextContent);
+      return nextContent;
+    }
+
+    const textarea = editorRef.current;
+    if (!textarea) {
+      setEditorContent(nextText);
+      return nextText;
+    }
+    const { selectionStart, selectionEnd } = textarea;
+    const target =
+      selectionStart !== selectionEnd
+        ? { start: selectionStart, end: selectionEnd }
+        : findCurrentParagraph(editorContent, selectionStart);
+    const nextContent = `${editorContent.slice(0, target.start)}${nextText}${editorContent.slice(target.end)}`;
+    setEditorContent(nextContent);
+    window.requestAnimationFrame(() => {
+      textarea.focus();
+      textarea.setSelectionRange(target.start, target.start + nextText.length);
+    });
+    return nextContent;
+  }
+
+  async function runEditorAction(action: EditorAction) {
+    if (!editorContent.trim()) {
+      setToast("请先生成或输入文章");
+      return;
+    }
+    const textarea = editorRef.current;
+    const selected =
+      textarea && textarea.selectionStart !== textarea.selectionEnd
+        ? editorContent.slice(textarea.selectionStart, textarea.selectionEnd)
+        : "";
+    const paragraph = textarea ? findCurrentParagraph(editorContent, textarea.selectionStart).text : editorContent;
+    const targetText = selected || paragraph || editorContent;
+    setLoading(`editor-${action}`);
+    try {
+      const data = await postJson<{ result: string }>("/api/editor-action", {
+        action,
+        text: targetText,
+        fullText: editorContent,
+        style: articleForm.style,
+        modelMode
+      });
+      const nextContent = applyEditorResult(data.result, action);
+      saveDraftVersion(`AI ${editorActionLabel(action)}`, nextContent);
+    } finally {
+      setLoading(null);
+    }
   }
 
   async function copyText(text: string) {
@@ -541,20 +660,85 @@ export default function Home() {
                 <div className="editor-grid">
                   <div className="editor-stack">
                     <div className="row-between editor-meta">
-                      <span>Markdown 编辑器</span>
-                      <span>{draftSavedAt ? `已保存 ${draftSavedAt}` : "等待保存"}</span>
+                      <span>Markdown 编辑器 {selectedText ? ` / 已选 ${selectedText.length} 字` : ""}</span>
+                      <span>{draftSavedAt ? `自动保存 ${draftSavedAt}` : "等待保存"}</span>
                     </div>
+                    <div className="editor-toolbar">
+                      <div className="mode-switch">
+                        <button className={editorMode === "edit" ? "active" : ""} onClick={() => setEditorMode("edit")}>
+                          <Edit3 size={14} /> 编辑
+                        </button>
+                        <button className={editorMode === "preview" ? "active" : ""} onClick={() => setEditorMode("preview")}>
+                          <Eye size={14} /> 预览
+                        </button>
+                      </div>
+                      <button className="btn" onClick={() => saveDraftVersion()}>
+                        <Save size={15} /> 保存版本
+                      </button>
+                    </div>
+                    <div className="editor-toolbar">
+                      <button className="btn" disabled={loading === "editor-rewrite-paragraph"} onClick={() => runEditorAction("rewrite-paragraph")}>
+                        <Wand2 size={15} /> 段落级重写
+                      </button>
+                      <button className="btn" disabled={loading === "editor-rewrite-heading"} onClick={() => runEditorAction("rewrite-heading")}>
+                        <Edit3 size={15} /> 小标题改写
+                      </button>
+                      <button className="btn" disabled={loading === "editor-extract-quotes"} onClick={() => runEditorAction("extract-quotes")}>
+                        <Quote size={15} /> 金句提取
+                      </button>
+                      <button className="btn" disabled={loading === "editor-expand"} onClick={() => runEditorAction("expand")}>
+                        <Plus size={15} /> 扩写
+                      </button>
+                      <button className="btn" disabled={loading === "editor-compress"} onClick={() => runEditorAction("compress")}>
+                        压缩
+                      </button>
+                      <button className="btn" disabled={loading === "editor-change-style"} onClick={() => runEditorAction("change-style")}>
+                        换风格
+                      </button>
+                    </div>
+                    {editorMode === "edit" ? (
                     <textarea
+                      ref={editorRef}
                       className="editor-area"
                       value={editorContent}
                       onChange={(event) => setEditorContent(event.target.value)}
+                      onSelect={updateSelection}
+                      onKeyUp={updateSelection}
+                      onClick={updateSelection}
                     />
+                    ) : (
+                      <MarkdownPreview content={editorContent} />
+                    )}
                   </div>
-                  {articleResult ? (
-                    <ArticlePreview article={articleResult} addToLibrary={addToLibrary} />
-                  ) : (
-                    <ResultBlock title="编辑稿" content={editorContent} />
-                  )}
+                  <div className="editor-side">
+                    <MarkdownPreview content={editorContent} compact />
+                    <div className="result-section">
+                      <div className="row-between">
+                        <h3 className="section-heading">版本历史</h3>
+                        <span className="muted">{draftVersions.length}/12</span>
+                      </div>
+                      <div className="version-list">
+                        {(draftVersions.length
+                          ? draftVersions
+                          : [{ id: "empty", title: "暂无版本", content: "", createdAt: "保存后会显示在这里" }]
+                        ).map((version) => (
+                          <button
+                            key={version.id}
+                            className="version-item"
+                            disabled={!version.content}
+                            onClick={() => {
+                              if (!version.content) return;
+                              setEditorContent(version.content);
+                              setToast("已恢复版本");
+                            }}
+                          >
+                            <strong>{version.title}</strong>
+                            <span>{version.createdAt}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
                 </div>
               )}
             </ResultPanel>
@@ -834,6 +1018,51 @@ function ResultPanel({
       </div>
       {children || <div className="empty">{empty}</div>}
     </section>
+  );
+}
+
+function editorActionLabel(action: EditorAction) {
+  const labels: Record<EditorAction, string> = {
+    "rewrite-paragraph": "段落重写",
+    "rewrite-heading": "小标题改写",
+    "extract-quotes": "金句提取",
+    expand: "扩写",
+    compress: "压缩",
+    "change-style": "换风格"
+  };
+  return labels[action];
+}
+
+function MarkdownPreview({ content, compact = false }: { content: string; compact?: boolean }) {
+  const blocks = content.split(/\n{2,}/).filter((block) => block.trim());
+  return (
+    <article className={compact ? "markdown-preview compact" : "markdown-preview"}>
+      {blocks.map((block, index) => {
+        const text = block.trim();
+        if (text.startsWith("# ")) return <h1 key={index}>{text.replace(/^#\s+/, "")}</h1>;
+        if (text.startsWith("## ")) return <h2 key={index}>{text.replace(/^##\s+/, "")}</h2>;
+        if (text.startsWith("> ")) return <blockquote key={index}>{text.replace(/^>\s+/, "")}</blockquote>;
+        if (/^-\s+/m.test(text)) {
+          return (
+            <ul key={index}>
+              {text.split("\n").map((line) => (
+                <li key={line}>{line.replace(/^-\s+/, "")}</li>
+              ))}
+            </ul>
+          );
+        }
+        return (
+          <p key={index}>
+            {text.split("\n").map((line) => (
+              <span key={line}>
+                {line}
+                <br />
+              </span>
+            ))}
+          </p>
+        );
+      })}
+    </article>
   );
 }
 

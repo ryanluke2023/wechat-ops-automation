@@ -1,4 +1,4 @@
-export type DbCollection = "calendar" | "library" | "history" | "drafts";
+export type DbCollection = "calendar" | "library" | "history" | "drafts" | "versions";
 
 const prefix = "wechat-ops-db";
 
