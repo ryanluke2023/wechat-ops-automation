@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { readApiSettings } from "@/lib/api-settings";
 
 type ImageKind = "cover" | "poster" | "inline";
 
@@ -45,8 +46,9 @@ export async function POST(request: Request) {
   const body = (await request.json()) as ImageGenerateBody;
   const kind = body.kind || "cover";
   const prompt = buildPrompt(body);
+  const settings = await readApiSettings();
 
-  if (!process.env.OPENAI_API_KEY) {
+  if (!settings.openAIKey) {
     return NextResponse.json(fallback(prompt, "OPENAI_API_KEY 未配置，已保留提示词兜底。"));
   }
 
@@ -55,13 +57,13 @@ export async function POST(request: Request) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`
+        Authorization: `Bearer ${settings.openAIKey}`
       },
       body: JSON.stringify({
-        model: process.env.OPENAI_IMAGE_MODEL || "gpt-image-1",
+        model: settings.imageModel,
         prompt,
         size: sizeFor(kind),
-        quality: process.env.OPENAI_IMAGE_QUALITY || "medium",
+        quality: settings.imageQuality,
         n: 1
       })
     });

@@ -6,9 +6,21 @@ export type SectionKey =
   | "calendar"
   | "review"
   | "library"
-  | "profiles";
+  | "profiles"
+  | "settings";
 
 export type ModelMode = "economy" | "quality" | "image";
+
+export type ApiSettings = {
+  openAIKey: string;
+  deepSeekKey: string;
+  openAIModel: string;
+  deepSeekModel: string;
+  imageModel: string;
+  imageQuality: string;
+  defaults: Record<ModelMode, string>;
+  fallbackEnabled: boolean;
+};
 
 export type ArticleStyle =
   | "深度财经分析"

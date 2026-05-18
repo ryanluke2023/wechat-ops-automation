@@ -11,6 +11,7 @@
 - 发布包：生成 Markdown、公众号排版版本、摘要、封面图提示词、文中配图提示词、朋友圈文案、小红书标题和短视频大纲。
 - 图片生成：提供封面图、海报图、文中配图生成入口；生成失败时保留提示词兜底。
 - 账号画像：保存账号定位、目标读者、常用语气、禁用表达、标题风格、结构模板和竞品账号。
+- 模型与 API 设置：维护 OpenAI Key、DeepSeek Key、图片模型、各模式默认模型、连通性测试和失败兜底开关。
 - 数据复盘：支持 CSV 导入、粘贴后台数据、趋势图、高表现选题识别和下周策略建议。
 - 素材库：保存选题、标题、金句、案例和图片提示词，支持搜索与标签。
 
@@ -140,6 +141,9 @@ DEEPSEEK_MODEL=deepseek-v4-flash
 - `POST /api/generate-publish-package`
 - `POST /api/generate-image`
 - `POST /api/analyze-performance`
+- `GET /api/api-settings`
+- `PUT /api/api-settings`
+- `POST /api/api-settings/test`
 - `GET /api/db?collection=history`
 - `PUT /api/db`
 

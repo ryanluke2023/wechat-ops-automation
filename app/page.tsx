@@ -19,6 +19,7 @@ import {
   Search,
   Save,
   Sparkles,
+  Settings,
   Trash2,
   Wand2
 } from "lucide-react";
@@ -27,6 +28,7 @@ import { clientDb } from "@/lib/client-db";
 import { weeklyPlanMock } from "@/lib/mock-generators";
 import {
   AccountProfile,
+  ApiSettings,
   ArticleResult,
   ArticleStyle,
   CalendarItem,
@@ -82,6 +84,15 @@ type GeneratedImage = {
   error?: string;
   createdAt: string;
 };
+type ApiSettingsForm = ApiSettings & {
+  hasOpenAIKey?: boolean;
+  hasDeepSeekKey?: boolean;
+};
+type ApiTestResult = {
+  name: string;
+  status: "ok" | "missing" | "failed";
+  message: string;
+};
 
 const workflowSteps: { key: WorkflowStep; label: string }[] = [
   { key: "topic", label: "生成选题" },
@@ -104,7 +115,8 @@ const operationTabs: { key: SectionKey; label: string; icon: typeof CalendarDays
   { key: "profiles", label: "策略库", icon: BookOpen },
   { key: "calendar", label: "运营日历", icon: CalendarDays },
   { key: "review", label: "数据复盘", icon: BarChart3 },
-  { key: "library", label: "素材库", icon: Library }
+  { key: "library", label: "素材库", icon: Library },
+  { key: "settings", label: "模型与 API", icon: Settings }
 ];
 
 const articleStyles: ArticleStyle[] = [
@@ -178,6 +190,23 @@ const blankProfileForm = {
   titleStyle: "",
   structureTemplate: "",
   competitors: ""
+};
+
+const defaultApiSettingsForm: ApiSettingsForm = {
+  openAIKey: "",
+  deepSeekKey: "",
+  openAIModel: "gpt-5.4-mini",
+  deepSeekModel: "deepseek-v4-flash",
+  imageModel: "gpt-image-1",
+  imageQuality: "medium",
+  defaults: {
+    economy: "deepseek-v4-flash",
+    quality: "gpt-5.4-mini",
+    image: "gpt-image-1"
+  },
+  fallbackEnabled: true,
+  hasOpenAIKey: false,
+  hasDeepSeekKey: false
 };
 
 async function postJson<T>(url: string, payload: unknown): Promise<T> {
@@ -408,6 +437,8 @@ export default function Home() {
   const [query, setQuery] = useState("");
   const [newItem, setNewItem] = useState({ category: "选题", title: "", content: "", tags: "" });
   const [profileForm, setProfileForm] = useState(blankProfileForm);
+  const [apiSettings, setApiSettings] = useState<ApiSettingsForm>(defaultApiSettingsForm);
+  const [apiTestResults, setApiTestResults] = useState<ApiTestResult[]>([]);
 
   const activeMode = modelModes.find((mode) => mode.key === modelMode) ?? modelModes[0];
   const activeProfile = useMemo(
@@ -446,6 +477,10 @@ export default function Home() {
       if (drafts[0]) {
         setEditorContent(drafts[0].content);
         setDraftSavedAt(drafts[0].savedAt);
+      }
+      const response = await fetch("/api/api-settings", { cache: "no-store" });
+      if (response.ok) {
+        setApiSettings({ ...defaultApiSettingsForm, ...((await response.json()) as ApiSettingsForm) });
       }
     }
     loadDatabase();
@@ -677,6 +712,35 @@ export default function Home() {
       ...items
     ]);
     setToast("已保存到素材库");
+  }
+
+  async function saveApiSettings() {
+    setLoading("api-settings");
+    try {
+      const response = await fetch("/api/api-settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(apiSettings)
+      });
+      if (!response.ok) throw new Error(await response.text());
+      setApiSettings({ ...defaultApiSettingsForm, ...((await response.json()) as ApiSettingsForm) });
+      setToast("模型与 API 设置已保存");
+    } finally {
+      setLoading(null);
+    }
+  }
+
+  async function testApiSettings() {
+    setLoading("api-test");
+    try {
+      const response = await fetch("/api/api-settings/test", { method: "POST" });
+      if (!response.ok) throw new Error(await response.text());
+      const data = (await response.json()) as { results: ApiTestResult[] };
+      setApiTestResults(data.results);
+      setToast("API 连通性测试已完成");
+    } finally {
+      setLoading(null);
+    }
   }
 
   function importPerformanceData(raw = performanceRaw) {
@@ -1063,20 +1127,26 @@ export default function Home() {
 
         <div className="workspace studio-workspace">
           <div className="content-tabs" aria-label="内容生产标签">
-            {studioTabs.map((tab) => {
-              const Icon = tab.icon;
-              return (
-                <button
-                  key={tab.key}
+                {studioTabs.map((tab) => {
+                  const Icon = tab.icon;
+                  return (
+                    <button
+                      key={tab.key}
                   className={active === tab.key ? "active" : ""}
                   onClick={() => setActive(tab.key)}
                 >
                   <Icon size={16} />
                   {tab.label}
                 </button>
-              );
-            })}
-          </div>
+                  );
+                })}
+                {active === "settings" ? (
+                  <button className="active" onClick={() => setActive("settings")}>
+                    <Settings size={16} />
+                    模型与 API
+                  </button>
+                ) : null}
+              </div>
 
           {active === "topics" && (
             <ResultPanel
@@ -1391,6 +1461,17 @@ export default function Home() {
               </section>
             </div>
           )}
+
+          {active === "settings" && (
+            <ApiSettingsPanel
+              settings={apiSettings}
+              setSettings={setApiSettings}
+              results={apiTestResults}
+              loading={loading}
+              onSave={saveApiSettings}
+              onTest={testApiSettings}
+            />
+          )}
         </div>
       </section>
 
@@ -1555,6 +1636,157 @@ export default function Home() {
         </div>
       </aside>
     </main>
+  );
+}
+
+function ApiSettingsPanel({
+  settings,
+  setSettings,
+  results,
+  loading,
+  onSave,
+  onTest
+}: {
+  settings: ApiSettingsForm;
+  setSettings: React.Dispatch<React.SetStateAction<ApiSettingsForm>>;
+  results: ApiTestResult[];
+  loading: string | null;
+  onSave: () => void;
+  onTest: () => void;
+}) {
+  const updateDefaults = (mode: ModelMode, value: string) => {
+    setSettings((current) => ({
+      ...current,
+      defaults: {
+        ...current.defaults,
+        [mode]: value
+      }
+    }));
+  };
+
+  return (
+    <div className="grid two settings-grid">
+      <section className="panel">
+        <div className="panel-title">
+          <div>
+            <h2>模型与 API 设置</h2>
+            <span className="muted">Key 保存在数据库，生成接口会优先读取这里的配置。</span>
+          </div>
+          <span className="badge">{settings.fallbackEnabled ? "兜底开启" : "兜底关闭"}</span>
+        </div>
+
+        <div className="settings-form">
+          <label>
+            OpenAI Key
+            <input
+              type="password"
+              value={settings.openAIKey}
+              placeholder={settings.hasOpenAIKey ? "已保存，留空则沿用" : "sk-..."}
+              onChange={(event) => setSettings((current) => ({ ...current, openAIKey: event.target.value }))}
+            />
+          </label>
+          <label>
+            DeepSeek Key
+            <input
+              type="password"
+              value={settings.deepSeekKey}
+              placeholder={settings.hasDeepSeekKey ? "已保存，留空则沿用" : "sk-..."}
+              onChange={(event) => setSettings((current) => ({ ...current, deepSeekKey: event.target.value }))}
+            />
+          </label>
+          <div className="grid two compact-grid">
+            <label>
+              OpenAI 文本模型
+              <input value={settings.openAIModel} onChange={(event) => setSettings((current) => ({ ...current, openAIModel: event.target.value }))} />
+            </label>
+            <label>
+              DeepSeek 文本模型
+              <input value={settings.deepSeekModel} onChange={(event) => setSettings((current) => ({ ...current, deepSeekModel: event.target.value }))} />
+            </label>
+          </div>
+          <div className="grid two compact-grid">
+            <label>
+              图片模型
+              <input value={settings.imageModel} onChange={(event) => setSettings((current) => ({ ...current, imageModel: event.target.value }))} />
+            </label>
+            <label>
+              图片质量
+              <select value={settings.imageQuality} onChange={(event) => setSettings((current) => ({ ...current, imageQuality: event.target.value }))}>
+                {["low", "medium", "high"].map((quality) => (
+                  <option key={quality} value={quality}>
+                    {quality}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          <div className="model-defaults">
+            <h3 className="section-heading">默认模型</h3>
+            <label>
+              经济模式默认模型
+              <input value={settings.defaults.economy} onChange={(event) => updateDefaults("economy", event.target.value)} />
+            </label>
+            <label>
+              高质量模式默认模型
+              <input value={settings.defaults.quality} onChange={(event) => updateDefaults("quality", event.target.value)} />
+            </label>
+            <label>
+              图片模式默认模型
+              <input value={settings.defaults.image} onChange={(event) => updateDefaults("image", event.target.value)} />
+            </label>
+          </div>
+
+          <label className="toggle-row">
+            <input
+              type="checkbox"
+              checked={settings.fallbackEnabled}
+              onChange={(event) => setSettings((current) => ({ ...current, fallbackEnabled: event.target.checked }))}
+            />
+            <span>
+              <strong>失败兜底开关</strong>
+              <em>开启后主模型失败会尝试备用模型，并保留本地 mock 兜底。</em>
+            </span>
+          </label>
+
+          <div className="actions">
+            <button className="btn primary" disabled={loading === "api-settings"} onClick={onSave}>
+              {loading === "api-settings" ? <Loader2 size={16} /> : <Save size={16} />} 保存设置
+            </button>
+            <button className="btn" disabled={loading === "api-test"} onClick={onTest}>
+              {loading === "api-test" ? <Loader2 size={16} /> : <Sparkles size={16} />} API 连通性测试
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <section className="panel">
+        <div className="panel-title">
+          <h2>连通性结果</h2>
+          <span className="badge">{results.length || 0} 项</span>
+        </div>
+        <div className="api-test-list">
+          {(results.length
+            ? results
+            : ([
+                { name: "OpenAI", status: "missing", message: settings.hasOpenAIKey ? "已保存，待测试" : "未配置 API Key" },
+                { name: "DeepSeek", status: "missing", message: settings.hasDeepSeekKey ? "已保存，待测试" : "未配置 API Key" },
+                { name: "图片模型", status: "missing", message: settings.imageModel }
+              ] as ApiTestResult[])
+          ).map((item) => (
+            <div key={item.name} className={`api-test-item ${item.status}`}>
+              <strong>{item.name}</strong>
+              <span>{item.status === "ok" ? "正常" : item.status === "missing" ? "未配置" : "失败"}</span>
+              <p>{item.message}</p>
+            </div>
+          ))}
+        </div>
+        <div className="result-section settings-note">
+          <h3 className="section-heading">安全提示</h3>
+          <p>不要把真实 Key 写入源码、README 或 .env.example。部署到 Vercel 时，生产环境建议使用平台环境变量或受控数据库，并限制后台访问权限。</p>
+        </div>
+      </section>
+    </div>
   );
 }
 

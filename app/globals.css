@@ -709,6 +709,97 @@ select:focus {
   line-height: 1.55;
 }
 
+.settings-grid {
+  align-items: start;
+}
+
+.settings-form,
+.model-defaults,
+.api-test-list {
+  display: grid;
+  gap: 12px;
+}
+
+.compact-grid {
+  gap: 12px;
+}
+
+.toggle-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(210, 210, 215, 0.78);
+  border-radius: 8px;
+  background: #fbfbfd;
+}
+
+.toggle-row input {
+  width: auto;
+  margin-top: 3px;
+}
+
+.toggle-row span {
+  display: grid;
+  gap: 4px;
+}
+
+.toggle-row em {
+  color: var(--muted);
+  font-style: normal;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.api-test-item {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 5px 10px;
+  padding: 13px;
+  border: 1px solid rgba(210, 210, 215, 0.78);
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.api-test-item span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.api-test-item p {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.api-test-item.ok {
+  border-color: rgba(52, 199, 89, 0.42);
+}
+
+.api-test-item.ok span {
+  color: var(--accent-2);
+}
+
+.api-test-item.failed {
+  border-color: rgba(255, 59, 48, 0.36);
+}
+
+.api-test-item.failed span {
+  color: var(--danger);
+}
+
+.settings-note {
+  margin-top: 14px;
+}
+
+.settings-note p {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
 .profile-list,
 .profile-form {
   display: grid;
