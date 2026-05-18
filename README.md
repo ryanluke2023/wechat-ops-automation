@@ -96,6 +96,7 @@ DEEPSEEK_MODEL=deepseek-v4-flash
 - `POST /api/generate-article`
 - `POST /api/generate-title`
 - `POST /api/generate-publish-package`
+- `POST /api/generate-image`
 - `POST /api/analyze-performance`
 
 ## 部署

@@ -9,6 +9,7 @@ import {
   Eye,
   FileDown,
   FileText,
+  ImageIcon,
   Layers,
   Library,
   Loader2,
@@ -41,10 +42,21 @@ type StudioTab = "topics" | "article" | "titles" | "package";
 type EditorMode = "edit" | "preview";
 type EditorAction = "rewrite-paragraph" | "rewrite-heading" | "extract-quotes" | "expand" | "compress" | "change-style";
 type WorkflowStep = "topic" | "title" | "article" | "package" | "calendar" | "review" | "template";
+type ImageKind = "cover" | "poster" | "inline";
 type DraftVersion = {
   id: string;
   title: string;
   content: string;
+  createdAt: string;
+};
+type GeneratedImage = {
+  id: string;
+  kind: ImageKind;
+  label: string;
+  prompt: string;
+  ok: boolean;
+  imageUrl?: string;
+  error?: string;
   createdAt: string;
 };
 
@@ -226,6 +238,7 @@ export default function Home() {
   const [articleResult, setArticleResult] = useState<ArticleResult | null>(null);
   const [titleResult, setTitleResult] = useState<TitleResult[]>([]);
   const [publishPackage, setPublishPackage] = useState<PublishPackage | null>(null);
+  const [generatedImages, setGeneratedImages] = useState<GeneratedImage[]>([]);
   const [performance, setPerformance] = useState<PerformanceResult | null>(null);
   const [calendar, setCalendar] = useState<CalendarItem[]>(defaultCalendar);
   const [library, setLibrary] = useState<LibraryItem[]>(defaultLibrary);
@@ -504,6 +517,73 @@ export default function Home() {
       setActive("package");
       remember(`发布包：${articleForm.topic}`);
       appendWorkflowLog("已生成发布包，可加入运营日历");
+    } finally {
+      setLoading(null);
+    }
+  }
+
+  async function generateImageAsset(kind: ImageKind, prompt: string, label: string) {
+    if (!prompt.trim()) {
+      setToast("暂无图片提示词");
+      return null;
+    }
+    const loadingKey = `image-${kind}`;
+    setLoading(loadingKey);
+    try {
+      const data = await postJson<Omit<GeneratedImage, "id" | "createdAt" | "kind" | "label">>("/api/generate-image", {
+        kind,
+        prompt,
+        topic: selectedWorkflowTopic || articleForm.topic,
+        title: selectedWorkflowTitle || articleResult?.title || articleForm.topic,
+        modelMode
+      });
+      const item: GeneratedImage = {
+        id: crypto.randomUUID(),
+        kind,
+        label,
+        prompt: data.prompt || prompt,
+        ok: data.ok,
+        imageUrl: data.imageUrl,
+        error: data.error,
+        createdAt: new Date().toLocaleString("zh-CN")
+      };
+      setGeneratedImages((items) => [item, ...items].slice(0, 12));
+      setToast(data.ok ? `${label}已生成` : `${label}生成失败，已保留提示词`);
+      return item;
+    } finally {
+      setLoading(null);
+    }
+  }
+
+  async function generateInlineImages() {
+    if (!publishPackage?.imagePrompts.length) {
+      setToast("暂无文中配图提示词");
+      return;
+    }
+    setLoading("image-inline");
+    try {
+      const results = await Promise.all(
+        publishPackage.imagePrompts.map((prompt, index) =>
+          postJson<Omit<GeneratedImage, "id" | "createdAt" | "kind" | "label">>("/api/generate-image", {
+            kind: "inline",
+            prompt,
+            topic: selectedWorkflowTopic || articleForm.topic,
+            title: selectedWorkflowTitle || articleResult?.title || articleForm.topic,
+            modelMode
+          }).then((data) => ({
+            id: crypto.randomUUID(),
+            kind: "inline" as ImageKind,
+            label: `文中配图 ${index + 1}`,
+            prompt: data.prompt || prompt,
+            ok: data.ok,
+            imageUrl: data.imageUrl,
+            error: data.error,
+            createdAt: new Date().toLocaleString("zh-CN")
+          }))
+        )
+      );
+      setGeneratedImages((items) => [...results, ...items].slice(0, 12));
+      setToast(results.some((item) => item.ok) ? "文中配图已生成" : "文中配图生成失败，已保留提示词");
     } finally {
       setLoading(null);
     }
@@ -916,6 +996,15 @@ export default function Home() {
                     <ResultBlock title="摘要" content={publishPackage.summary} />
                     <ResultBlock title="封面图提示词" content={publishPackage.coverPrompt} />
                     <ResultList title="文中配图提示词" items={publishPackage.imagePrompts} onSave={addToLibrary} />
+                    <ImageGenerationPanel
+                      packageData={publishPackage}
+                      images={generatedImages}
+                      loading={loading}
+                      onCover={() => generateImageAsset("cover", publishPackage.coverPrompt, "封面图")}
+                      onPoster={() => generateImageAsset("poster", publishPackage.posterCopy || publishPackage.coverPrompt, "海报图")}
+                      onInline={generateInlineImages}
+                      onCopy={copyText}
+                    />
                     <ResultBlock title="朋友圈文案" content={publishPackage.momentsCopy} />
                     <ResultList title="小红书标题" items={publishPackage.xiaohongshuTitles} onSave={addToLibrary} />
                     <ResultList title="短视频口播大纲" items={publishPackage.shortVideoOutline} onSave={addToLibrary} />
@@ -1251,6 +1340,88 @@ function WorkflowChoiceList({
             <span>{item}</span>
             <strong>{selected === item ? "已选" : actionLabel}</strong>
           </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ImageGenerationPanel({
+  packageData,
+  images,
+  loading,
+  onCover,
+  onPoster,
+  onInline,
+  onCopy
+}: {
+  packageData: PublishPackage;
+  images: GeneratedImage[];
+  loading: string | null;
+  onCover: () => void;
+  onPoster: () => void;
+  onInline: () => void;
+  onCopy: (text: string) => void;
+}) {
+  return (
+    <div className="result-section image-generator">
+      <div className="row-between">
+        <h3 className="section-heading">真实图片生成</h3>
+        <span className="muted">{images.length ? `${images.length} 张资产` : "提示词兜底"}</span>
+      </div>
+      <div className="actions image-actions">
+        <button className="btn primary" disabled={loading === "image-cover"} onClick={onCover}>
+          {loading === "image-cover" ? <Loader2 size={16} /> : <ImageIcon size={16} />} 封面图生成
+        </button>
+        <button className="btn" disabled={loading === "image-poster"} onClick={onPoster}>
+          {loading === "image-poster" ? <Loader2 size={16} /> : <ImageIcon size={16} />} 海报图生成
+        </button>
+        <button className="btn" disabled={loading === "image-inline"} onClick={onInline}>
+          {loading === "image-inline" ? <Loader2 size={16} /> : <ImageIcon size={16} />} 文中配图生成
+        </button>
+      </div>
+      <div className="image-prompt-fallback">
+        <button className="btn ghost" onClick={() => onCopy(packageData.coverPrompt)}>
+          复制封面提示词
+        </button>
+        <button className="btn ghost" onClick={() => onCopy(packageData.posterCopy || packageData.coverPrompt)}>
+          复制海报提示词
+        </button>
+      </div>
+      <div className="image-grid">
+        {(images.length
+          ? images
+          : [
+              {
+                id: "empty",
+                kind: "cover" as ImageKind,
+                label: "等待生成",
+                prompt: packageData.coverPrompt,
+                ok: false,
+                createdAt: "未调用图片模型"
+              }
+            ]
+        ).map((item) => (
+          <article className="image-card" key={item.id}>
+            {item.imageUrl ? (
+              <img src={item.imageUrl} alt={item.label} />
+            ) : (
+              <div className="image-fallback">
+                <ImageIcon size={28} />
+                <span>{item.error || "生成失败时可继续使用提示词"}</span>
+              </div>
+            )}
+            <div className="image-card-body">
+              <div className="row-between">
+                <strong>{item.label}</strong>
+                <span className={item.ok ? "image-status ok" : "image-status"}>{item.ok ? "已生成" : "提示词"}</span>
+              </div>
+              <p>{item.prompt}</p>
+              <button className="btn ghost" onClick={() => onCopy(item.prompt)}>
+                复制提示词
+              </button>
+            </div>
+          </article>
         ))}
       </div>
     </div>

@@ -796,6 +796,80 @@ select:focus {
   color: var(--text);
 }
 
+.image-generator {
+  background: #ffffff;
+}
+
+.image-actions,
+.image-prompt-fallback {
+  margin-bottom: 10px;
+}
+
+.image-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.image-card {
+  overflow: hidden;
+  border: 1px solid rgba(210, 210, 215, 0.82);
+  border-radius: 8px;
+  background: #fbfbfd;
+}
+
+.image-card img,
+.image-fallback {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  display: block;
+  object-fit: cover;
+  background: #f2f2f7;
+}
+
+.image-fallback {
+  display: grid;
+  place-items: center;
+  gap: 8px;
+  padding: 18px;
+  color: var(--muted);
+  text-align: center;
+  font-size: 12px;
+}
+
+.image-card-body {
+  display: grid;
+  gap: 9px;
+  padding: 12px;
+}
+
+.image-card-body strong {
+  font-size: 13px;
+}
+
+.image-card-body p {
+  color: var(--soft);
+  font-size: 12px;
+  line-height: 1.58;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.image-status {
+  padding: 4px 7px;
+  border-radius: 999px;
+  background: #f2f2f7;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.image-status.ok {
+  background: rgba(52, 199, 89, 0.12);
+  color: #1f7a35;
+}
+
 .hero-score {
   display: grid;
   gap: 4px;
@@ -886,7 +960,8 @@ select:focus {
   .grid.two,
   .grid.three,
   .command-strip,
-  .editor-grid {
+  .editor-grid,
+  .image-grid {
     grid-template-columns: 1fr;
   }
 
