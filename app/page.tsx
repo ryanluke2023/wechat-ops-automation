@@ -44,6 +44,28 @@ type EditorMode = "edit" | "preview";
 type EditorAction = "rewrite-paragraph" | "rewrite-heading" | "extract-quotes" | "expand" | "compress" | "change-style";
 type WorkflowStep = "topic" | "title" | "article" | "package" | "calendar" | "review" | "template";
 type ImageKind = "cover" | "poster" | "inline";
+type PerformanceRow = {
+  date: string;
+  title: string;
+  topic: string;
+  reads: number;
+  likes: number;
+  wows: number;
+  shares: number;
+  saves: number;
+  followers: number;
+  openRate: number;
+  completion: number;
+};
+type PerformanceAnalysis = {
+  rows: PerformanceRow[];
+  totals: Omit<PerformanceRow, "date" | "title" | "topic" | "openRate" | "completion"> & {
+    openRate: number;
+    completion: number;
+  };
+  topRows: PerformanceRow[];
+  strategies: string[];
+};
 type DraftVersion = {
   id: string;
   title: string;
@@ -222,6 +244,115 @@ function normalizeTitles(data: TitleResult[] | { data: TitleResult[] }) {
   return Array.isArray(data) ? data : data.data;
 }
 
+function splitDelimitedLine(line: string) {
+  const result: string[] = [];
+  let current = "";
+  let quoted = false;
+  for (const char of line) {
+    if (char === "\"") {
+      quoted = !quoted;
+      continue;
+    }
+    if ((char === "," || char === "\t") && !quoted) {
+      result.push(current.trim());
+      current = "";
+      continue;
+    }
+    current += char;
+  }
+  result.push(current.trim());
+  return result;
+}
+
+function numberFrom(value: string | undefined) {
+  if (!value) return 0;
+  return Number(value.replace(/[,%，\s]/g, "")) || 0;
+}
+
+function normalizeHeader(header: string) {
+  const value = header.trim().toLowerCase();
+  if (/日期|date|时间/.test(value)) return "date";
+  if (/标题|title|文章/.test(value)) return "title";
+  if (/选题|topic|主题/.test(value)) return "topic";
+  if (/阅读|read|pv/.test(value)) return "reads";
+  if (/点赞|like/.test(value)) return "likes";
+  if (/在看|wow/.test(value)) return "wows";
+  if (/分享|转发|share/.test(value)) return "shares";
+  if (/收藏|save/.test(value)) return "saves";
+  if (/涨粉|关注|followers|follow/.test(value)) return "followers";
+  if (/打开率|open/.test(value)) return "openRate";
+  if (/完读|completion|完成率/.test(value)) return "completion";
+  return value;
+}
+
+function parsePerformanceRows(raw: string): PerformanceRow[] {
+  const lines = raw.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  if (lines.length < 2) return [];
+  const headers = splitDelimitedLine(lines[0]).map(normalizeHeader);
+  return lines.slice(1).map((line, index) => {
+    const cells = splitDelimitedLine(line);
+    const row = Object.fromEntries(headers.map((header, cellIndex) => [header, cells[cellIndex] || ""]));
+    return {
+      date: String(row.date || `第 ${index + 1} 篇`),
+      title: String(row.title || row.topic || `未命名内容 ${index + 1}`),
+      topic: String(row.topic || row.title || "未分类选题"),
+      reads: numberFrom(String(row.reads || "")),
+      likes: numberFrom(String(row.likes || "")),
+      wows: numberFrom(String(row.wows || "")),
+      shares: numberFrom(String(row.shares || "")),
+      saves: numberFrom(String(row.saves || "")),
+      followers: numberFrom(String(row.followers || "")),
+      openRate: numberFrom(String(row.openRate || "")),
+      completion: numberFrom(String(row.completion || ""))
+    };
+  });
+}
+
+function analyzeRows(rows: PerformanceRow[]): PerformanceAnalysis | null {
+  if (!rows.length) return null;
+  const totals = rows.reduce(
+    (sum, row) => ({
+      reads: sum.reads + row.reads,
+      likes: sum.likes + row.likes,
+      wows: sum.wows + row.wows,
+      shares: sum.shares + row.shares,
+      saves: sum.saves + row.saves,
+      followers: sum.followers + row.followers,
+      openRate: sum.openRate + row.openRate,
+      completion: sum.completion + row.completion
+    }),
+    { reads: 0, likes: 0, wows: 0, shares: 0, saves: 0, followers: 0, openRate: 0, completion: 0 }
+  );
+  totals.openRate = Math.round((totals.openRate / rows.length) * 10) / 10;
+  totals.completion = Math.round((totals.completion / rows.length) * 10) / 10;
+
+  const scored = rows
+    .map((row) => ({
+      row,
+      score: row.reads * 0.35 + row.likes * 8 + row.wows * 10 + row.shares * 14 + row.saves * 12 + row.followers * 18 + row.completion * 9
+    }))
+    .sort((a, b) => b.score - a.score);
+  const topRows = scored.slice(0, 5).map((item) => item.row);
+  const topTopic = topRows[0]?.topic || "高收藏选题";
+  const strategies = [
+    `下周保留 2 篇同类选题：${topTopic}`,
+    `把最高阅读标题拆成 3 个标题实验方向，优先测试反常识和数字型表达。`,
+    `收藏/分享高的内容适合改成清单、图解和短视频口播，做二次分发。`,
+    `完读率低于 ${totals.completion}% 的主题，下周开头 150 字直接给判断和收益。`
+  ];
+  return { rows, totals, topRows, strategies };
+}
+
+function samplePerformanceCsv() {
+  return [
+    "日期,标题,选题,阅读,点赞,在看,分享,收藏,涨粉,打开率,完读率",
+    "2026-05-13,AI 运营为什么必须自动化,AI 内容运营,4200,220,56,108,190,86,21,53",
+    "2026-05-14,别再只追热点了,选题策略,3100,166,32,72,140,48,17,46",
+    "2026-05-15,一篇文章拆成四个平台内容,内容分发,5200,310,88,166,240,112,24,58",
+    "2026-05-16,公众号标题实验的 8 个模板,标题实验,2800,140,26,54,120,33,15,42"
+  ].join("\n");
+}
+
 export default function Home() {
   const editorRef = useRef<HTMLTextAreaElement>(null);
   const [active, setActive] = useState<SectionKey>("topics");
@@ -261,6 +392,8 @@ export default function Home() {
     openRate: 18,
     completion: 46
   });
+  const [performanceRaw, setPerformanceRaw] = useState(samplePerformanceCsv());
+  const [performanceAnalysis, setPerformanceAnalysis] = useState<PerformanceAnalysis | null>(null);
 
   const [topicResult, setTopicResult] = useState<TopicResult | null>(null);
   const [articleResult, setArticleResult] = useState<ArticleResult | null>(null);
@@ -546,6 +679,35 @@ export default function Home() {
     setToast("已保存到素材库");
   }
 
+  function importPerformanceData(raw = performanceRaw) {
+    const rows = parsePerformanceRows(raw);
+    const analysis = analyzeRows(rows);
+    if (!analysis) {
+      setToast("未识别到有效数据");
+      return null;
+    }
+    setPerformanceAnalysis(analysis);
+    setReviewForm({
+      reads: analysis.totals.reads,
+      likes: analysis.totals.likes,
+      wows: analysis.totals.wows,
+      shares: analysis.totals.shares,
+      saves: analysis.totals.saves,
+      followers: analysis.totals.followers,
+      openRate: analysis.totals.openRate,
+      completion: analysis.totals.completion
+    });
+    setToast(`已导入 ${analysis.rows.length} 条后台数据`);
+    return analysis;
+  }
+
+  async function handleCsvFile(file?: File) {
+    if (!file) return;
+    const text = await file.text();
+    setPerformanceRaw(text);
+    importPerformanceData(text);
+  }
+
   async function generateTopic() {
     setLoading("topics");
     try {
@@ -728,7 +890,15 @@ export default function Home() {
   async function analyzePerformance() {
     setLoading("review");
     try {
-      const data = await postJson<PerformanceResult>("/api/analyze-performance", { ...reviewForm, modelMode });
+      const analysis = performanceAnalysis || importPerformanceData() || null;
+      const data = await postJson<PerformanceResult>("/api/analyze-performance", {
+        ...reviewForm,
+        importedRows: analysis?.rows.slice(0, 20),
+        highPerformers: analysis?.topRows,
+        nextWeekStrategies: analysis?.strategies,
+        modelMode,
+        accountProfile: activeProfile
+      });
       setPerformance(data);
       setActive("review");
       remember(`复盘评分：${data.score}`);
@@ -1160,6 +1330,7 @@ export default function Home() {
             >
               {performance && (
                 <div className="result">
+                  {performanceAnalysis ? <PerformanceDashboard analysis={performanceAnalysis} /> : null}
                   <div className="card hero-score">
                     <span>内容表现评分</span>
                     <b>{performance.score}</b>
@@ -1169,6 +1340,9 @@ export default function Home() {
                   <ResultList title="下次优化建议" items={performance.improvements} onSave={addToLibrary} />
                   <ResultList title="可复用模式" items={performance.reusablePatterns} onSave={addToLibrary} />
                   <ResultList title="应避免的问题" items={performance.avoid} onSave={addToLibrary} />
+                  {performanceAnalysis ? (
+                    <ResultList title="下周内容策略" items={performanceAnalysis.strategies} onSave={addToLibrary} />
+                  ) : null}
                   <button className="btn primary" onClick={saveReviewAsTemplate}>
                     <Save size={16} /> 沉淀为模板
                   </button>
@@ -1346,6 +1520,19 @@ export default function Home() {
 
         {active === "review" && (
           <div className="rail-form">
+            <label>
+              导入 CSV
+              <input type="file" accept=".csv,text/csv,.txt" onChange={(e) => handleCsvFile(e.target.files?.[0])} />
+            </label>
+            <label>
+              粘贴公众号后台数据
+              <textarea value={performanceRaw} onChange={(e) => setPerformanceRaw(e.target.value)} />
+            </label>
+            <div className="actions vertical-actions">
+              <button className="btn" onClick={() => importPerformanceData()}>
+                <BarChart3 size={16} /> 解析数据并生成趋势图
+              </button>
+            </div>
             {Object.entries(reviewForm).map(([key, value]) => (
               <label key={key}>
                 {metricLabel(key)}
@@ -1666,6 +1853,60 @@ function ImageGenerationPanel({
   );
 }
 
+function PerformanceDashboard({ analysis }: { analysis: PerformanceAnalysis }) {
+  const maxReads = Math.max(...analysis.rows.map((row) => row.reads), 1);
+  const points = analysis.rows.map((row, index) => {
+    const x = analysis.rows.length === 1 ? 50 : (index / (analysis.rows.length - 1)) * 100;
+    const y = 100 - (row.reads / maxReads) * 82 - 8;
+    return `${x},${Math.max(8, y)}`;
+  });
+  return (
+    <div className="performance-dashboard">
+      <div className="metric-grid">
+        <MetricCard label="总阅读" value={analysis.totals.reads} />
+        <MetricCard label="总互动" value={analysis.totals.likes + analysis.totals.wows + analysis.totals.shares + analysis.totals.saves} />
+        <MetricCard label="涨粉" value={analysis.totals.followers} />
+        <MetricCard label="平均完读率" value={`${analysis.totals.completion}%`} />
+      </div>
+      <div className="trend-card">
+        <div className="row-between">
+          <h3 className="section-heading">阅读趋势图</h3>
+          <span className="muted">{analysis.rows.length} 条数据</span>
+        </div>
+        <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="trend-chart" role="img" aria-label="阅读趋势图">
+          <polyline points={points.join(" ")} />
+        </svg>
+        <div className="trend-labels">
+          {analysis.rows.map((row) => (
+            <span key={`${row.date}-${row.title}`}>{row.date}</span>
+          ))}
+        </div>
+      </div>
+      <div className="result-section">
+        <h3 className="section-heading">自动识别高表现选题</h3>
+        <div className="top-topic-list">
+          {analysis.topRows.map((row) => (
+            <div key={`${row.date}-${row.title}`} className="top-topic-item">
+              <strong>{row.topic}</strong>
+              <span>{row.title}</span>
+              <b>{row.reads} 阅读 / {row.saves} 收藏 / {row.shares} 分享</b>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MetricCard({ label, value }: { label: string; value: number | string }) {
+  return (
+    <div className="metric-card">
+      <span>{label}</span>
+      <b>{value}</b>
+    </div>
+  );
+}
+
 function ResultPanel({
   title,
   actions,
@@ -1748,14 +1989,15 @@ function ResultList({
   onSave
 }: {
   title: string;
-  items: string[];
+  items: string[] | unknown;
   onSave: (category: string, title: string, content: string, tags?: string[]) => void;
 }) {
+  const normalizedItems = Array.isArray(items) ? items.map(String) : [stringifyContent(items)].filter(Boolean);
   return (
     <div className="result-section">
       <h3 className="section-heading">{title}</h3>
       <ul className="list">
-        {items.map((item) => (
+        {normalizedItems.map((item) => (
           <li key={item}>
             <div className="row-between">
               <span>{item}</span>
