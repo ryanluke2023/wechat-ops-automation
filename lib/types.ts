@@ -5,7 +5,8 @@ export type SectionKey =
   | "package"
   | "calendar"
   | "review"
-  | "library";
+  | "library"
+  | "profiles";
 
 export type ModelMode = "economy" | "quality" | "image";
 
@@ -84,5 +85,18 @@ export type LibraryItem = {
   title: string;
   content: string;
   tags: string[];
+  createdAt: string;
+};
+
+export type AccountProfile = {
+  id: string;
+  name: string;
+  positioning: string;
+  targetReaders: string;
+  tone: string;
+  bannedExpressions: string;
+  titleStyle: string;
+  structureTemplate: string;
+  competitors: string;
   createdAt: string;
 };

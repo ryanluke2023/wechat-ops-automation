@@ -26,6 +26,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { clientDb } from "@/lib/client-db";
 import { weeklyPlanMock } from "@/lib/mock-generators";
 import {
+  AccountProfile,
   ArticleResult,
   ArticleStyle,
   CalendarItem,
@@ -78,6 +79,7 @@ const studioTabs: { key: StudioTab; label: string; icon: typeof Sparkles }[] = [
 ];
 
 const operationTabs: { key: SectionKey; label: string; icon: typeof CalendarDays }[] = [
+  { key: "profiles", label: "策略库", icon: BookOpen },
   { key: "calendar", label: "运营日历", icon: CalendarDays },
   { key: "review", label: "数据复盘", icon: BarChart3 },
   { key: "library", label: "素材库", icon: Library }
@@ -129,6 +131,32 @@ const defaultLibrary: LibraryItem[] = [
     createdAt: "2026-05-18"
   }
 ];
+
+const defaultProfiles: AccountProfile[] = [
+  {
+    id: "profile-ai-finance",
+    name: "AI 财经趋势号",
+    positioning: "面向公众号运营者和内容创业者的 AI 财经科技趋势分析号，强调判断、结构和可执行清单。",
+    targetReaders: "个人 IP、企业新媒体负责人、内容创业者、关注 AI 商业化的知识型读者。",
+    tone: "冷静、克制、专业，有 Bloomberg / Wall Street Journal 的信息密度，不煽情，不喊口号。",
+    bannedExpressions: "遥遥领先、颠覆一切、普通人逆袭、闭眼入、保姆级、全网最全、看完震惊。",
+    titleStyle: "反常识判断 + 明确收益 + 时间窗口，标题要有冲突但不夸张。",
+    structureTemplate: "开头给判断 -> 三个底层变量 -> 一个案例/数据点 -> 风险提醒 -> 行动清单 -> 金句收束。",
+    competitors: "晚点 LatePost、远川研究所、硅星人、半佛仙人、甲子光年",
+    createdAt: "2026-05-18"
+  }
+];
+
+const blankProfileForm = {
+  name: "",
+  positioning: "",
+  targetReaders: "",
+  tone: "",
+  bannedExpressions: "",
+  titleStyle: "",
+  structureTemplate: "",
+  competitors: ""
+};
 
 async function postJson<T>(url: string, payload: unknown): Promise<T> {
   const response = await fetch(url, {
@@ -242,10 +270,17 @@ export default function Home() {
   const [performance, setPerformance] = useState<PerformanceResult | null>(null);
   const [calendar, setCalendar] = useState<CalendarItem[]>(defaultCalendar);
   const [library, setLibrary] = useState<LibraryItem[]>(defaultLibrary);
+  const [profiles, setProfiles] = useState<AccountProfile[]>(defaultProfiles);
+  const [selectedProfileId, setSelectedProfileId] = useState(defaultProfiles[0]?.id || "");
   const [query, setQuery] = useState("");
   const [newItem, setNewItem] = useState({ category: "选题", title: "", content: "", tags: "" });
+  const [profileForm, setProfileForm] = useState(blankProfileForm);
 
   const activeMode = modelModes.find((mode) => mode.key === modelMode) ?? modelModes[0];
+  const activeProfile = useMemo(
+    () => profiles.find((profile) => profile.id === selectedProfileId) ?? profiles[0] ?? null,
+    [profiles, selectedProfileId]
+  );
   const workflowState = useMemo<Record<WorkflowStep, boolean>>(
     () => ({
       topic: Boolean(topicResult),
@@ -270,6 +305,8 @@ export default function Home() {
     async function loadDatabase() {
       setCalendar(await clientDb.read("calendar", defaultCalendar));
       setLibrary(await clientDb.read("library", defaultLibrary));
+      setProfiles(await clientDb.read("profiles", defaultProfiles));
+      setSelectedProfileId(await clientDb.read("selectedProfile", defaultProfiles[0]?.id || ""));
       setHistory(await clientDb.read("history", []));
       setDraftVersions(await clientDb.read("versions", []));
       const drafts = await clientDb.read<{ content: string; savedAt: string }[]>("drafts", []);
@@ -290,6 +327,14 @@ export default function Home() {
   }, [library]);
 
   useEffect(() => {
+    clientDb.write("profiles", profiles);
+  }, [profiles]);
+
+  useEffect(() => {
+    clientDb.write("selectedProfile", selectedProfileId);
+  }, [selectedProfileId]);
+
+  useEffect(() => {
     clientDb.write("history", history);
   }, [history]);
 
@@ -306,6 +351,48 @@ export default function Home() {
 
   function remember(text: string) {
     setHistory((items) => [text, ...items].slice(0, 8));
+  }
+
+  function withProfile<T extends Record<string, unknown>>(payload: T) {
+    return { ...payload, accountProfile: activeProfile };
+  }
+
+  function saveAccountProfile() {
+    if (!profileForm.name.trim()) {
+      setToast("请先填写账号名称");
+      return;
+    }
+    const profile: AccountProfile = {
+      id: crypto.randomUUID(),
+      name: profileForm.name.trim(),
+      positioning: profileForm.positioning.trim(),
+      targetReaders: profileForm.targetReaders.trim(),
+      tone: profileForm.tone.trim(),
+      bannedExpressions: profileForm.bannedExpressions.trim(),
+      titleStyle: profileForm.titleStyle.trim(),
+      structureTemplate: profileForm.structureTemplate.trim(),
+      competitors: profileForm.competitors.trim(),
+      createdAt: new Date().toISOString().slice(0, 10)
+    };
+    setProfiles((items) => [profile, ...items]);
+    setSelectedProfileId(profile.id);
+    setProfileForm(blankProfileForm);
+    setToast("账号画像已保存");
+  }
+
+  function applyProfile(profile: AccountProfile) {
+    setSelectedProfileId(profile.id);
+    setTopicForm((form) => ({
+      ...form,
+      audience: profile.targetReaders || form.audience,
+      positioning: profile.positioning || form.positioning
+    }));
+    setArticleForm((form) => ({
+      ...form,
+      positioning: profile.positioning || form.positioning,
+      audience: profile.targetReaders || form.audience
+    }));
+    setToast(`已切换画像：${profile.name}`);
   }
 
   function appendWorkflowLog(text: string) {
@@ -462,7 +549,7 @@ export default function Home() {
   async function generateTopic() {
     setLoading("topics");
     try {
-      const data = await postJson<TopicResult>("/api/generate-topic", { ...topicForm, modelMode });
+      const data = await postJson<TopicResult>("/api/generate-topic", withProfile({ ...topicForm, modelMode }));
       setTopicResult(data);
       setActive("topics");
       remember(`选题：${topicForm.domain}`);
@@ -475,7 +562,7 @@ export default function Home() {
   async function generateArticle(title = selectedWorkflowTitle) {
     setLoading("article");
     try {
-      const data = await postJson<ArticleResult>("/api/generate-article", { ...articleForm, modelMode });
+      const data = await postJson<ArticleResult>("/api/generate-article", withProfile({ ...articleForm, modelMode }));
       const article = title ? { ...data, title } : data;
       setArticleResult(article);
       setEditorContent(articleToMarkdown(article));
@@ -491,9 +578,11 @@ export default function Home() {
     setLoading("titles");
     try {
       const data = await postJson<TitleResult[] | { data: TitleResult[] }>("/api/generate-title", {
-        topic,
-        audience: articleForm.audience,
-        modelMode
+        ...withProfile({
+          topic,
+          audience: articleForm.audience,
+          modelMode
+        })
       });
       const titles = normalizeTitles(data);
       setTitleResult(titles);
@@ -509,9 +598,11 @@ export default function Home() {
     setLoading("package");
     try {
       const data = await postJson<PublishPackage>("/api/generate-publish-package", {
-        article: articleResult,
-        topic: articleForm.topic,
-        modelMode
+        ...withProfile({
+          article: articleResult,
+          topic: articleForm.topic,
+          modelMode
+        })
       });
       setPublishPackage(data);
       setActive("package");
@@ -592,16 +683,18 @@ export default function Home() {
   async function runPipeline() {
     setLoading("pipeline");
     try {
-      const topic = await postJson<TopicResult>("/api/generate-topic", { ...topicForm, modelMode });
+      const topic = await postJson<TopicResult>("/api/generate-topic", withProfile({ ...topicForm, modelMode }));
       setTopicResult(topic);
       const selectedTopic = topic.recommendations[0] || articleForm.topic;
       const nextArticleForm = { ...articleForm, topic: selectedTopic };
       setArticleForm(nextArticleForm);
 
       const titles = await postJson<TitleResult[] | { data: TitleResult[] }>("/api/generate-title", {
-        topic: selectedTopic,
-        audience: nextArticleForm.audience,
-        modelMode
+        ...withProfile({
+          topic: selectedTopic,
+          audience: nextArticleForm.audience,
+          modelMode
+        })
       });
       const titleList = normalizeTitles(titles);
       setTitleResult(titleList);
@@ -609,15 +702,17 @@ export default function Home() {
       setSelectedWorkflowTopic(selectedTopic);
       setSelectedWorkflowTitle(selectedTitle);
 
-      const article = await postJson<ArticleResult>("/api/generate-article", { ...nextArticleForm, modelMode });
+      const article = await postJson<ArticleResult>("/api/generate-article", withProfile({ ...nextArticleForm, modelMode }));
       const titledArticle = { ...article, title: selectedTitle };
       setArticleResult(titledArticle);
       setEditorContent(articleToMarkdown(titledArticle));
 
       const pack = await postJson<PublishPackage>("/api/generate-publish-package", {
-        article: titledArticle,
-        topic: selectedTopic,
-        modelMode
+        ...withProfile({
+          article: titledArticle,
+          topic: selectedTopic,
+          modelMode
+        })
       });
       setPublishPackage(pack);
       addWorkflowCalendarItem(selectedTopic, selectedTitle, true);
@@ -1025,6 +1120,21 @@ export default function Home() {
             </ResultPanel>
           )}
 
+          {active === "profiles" && (
+            <AccountProfilesPanel
+              profiles={profiles}
+              selectedProfileId={selectedProfileId}
+              profileForm={profileForm}
+              setProfileForm={setProfileForm}
+              onApply={applyProfile}
+              onSave={saveAccountProfile}
+              onDelete={(id) => {
+                setProfiles((items) => items.filter((profile) => profile.id !== id));
+                if (selectedProfileId === id) setSelectedProfileId(profiles.find((profile) => profile.id !== id)?.id || "");
+              }}
+            />
+          )}
+
           {active === "calendar" && (
             <section className="panel">
               <div className="panel-title">
@@ -1124,6 +1234,26 @@ export default function Home() {
           ))}
         </div>
         <p className="muted rail-hint">{activeMode.hint}</p>
+
+        <div className="rail-form profile-selector">
+          <label>
+            当前账号画像
+            <select value={selectedProfileId} onChange={(event) => applyProfile(profiles.find((profile) => profile.id === event.target.value) || profiles[0])}>
+              {profiles.map((profile) => (
+                <option key={profile.id} value={profile.id}>
+                  {profile.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          {activeProfile ? (
+            <div className="profile-brief">
+              <strong>{activeProfile.name}</strong>
+              <span>{activeProfile.positioning}</span>
+              <span>语气：{activeProfile.tone}</span>
+            </div>
+          ) : null}
+        </div>
 
         <div className="rail-form">
           <button className="btn primary" disabled={loading === "pipeline"} onClick={runPipeline}>
@@ -1238,6 +1368,114 @@ export default function Home() {
         </div>
       </aside>
     </main>
+  );
+}
+
+function AccountProfilesPanel({
+  profiles,
+  selectedProfileId,
+  profileForm,
+  setProfileForm,
+  onApply,
+  onSave,
+  onDelete
+}: {
+  profiles: AccountProfile[];
+  selectedProfileId: string;
+  profileForm: typeof blankProfileForm;
+  setProfileForm: React.Dispatch<React.SetStateAction<typeof blankProfileForm>>;
+  onApply: (profile: AccountProfile) => void;
+  onSave: () => void;
+  onDelete: (id: string) => void;
+}) {
+  return (
+    <div className="grid two">
+      <section className="panel">
+        <div className="panel-title">
+          <h2>账号画像 / 内容策略库</h2>
+          <span className="badge">{profiles.length} 个账号</span>
+        </div>
+        <div className="profile-list">
+          {profiles.map((profile) => (
+            <article className={selectedProfileId === profile.id ? "profile-card active" : "profile-card"} key={profile.id}>
+              <div className="panel-title compact-title">
+                <div>
+                  <h3>{profile.name}</h3>
+                  <span className="muted">{profile.createdAt}</span>
+                </div>
+                <div className="actions">
+                  <button className="btn" onClick={() => onApply(profile)}>
+                    设为当前
+                  </button>
+                  <button className="btn ghost" onClick={() => onDelete(profile.id)}>
+                    <Trash2 size={16} />
+                  </button>
+                </div>
+              </div>
+              <ProfileField title="账号定位" value={profile.positioning} />
+              <ProfileField title="目标读者" value={profile.targetReaders} />
+              <ProfileField title="常用语气" value={profile.tone} />
+              <ProfileField title="禁用表达" value={profile.bannedExpressions} />
+              <ProfileField title="标题风格" value={profile.titleStyle} />
+              <ProfileField title="内容结构模板" value={profile.structureTemplate} />
+              <ProfileField title="竞品账号" value={profile.competitors} />
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="panel">
+        <div className="panel-title">
+          <h2>新增账号画像</h2>
+        </div>
+        <div className="profile-form">
+          <label>
+            账号名称
+            <input value={profileForm.name} onChange={(e) => setProfileForm({ ...profileForm, name: e.target.value })} />
+          </label>
+          <label>
+            账号定位
+            <textarea value={profileForm.positioning} onChange={(e) => setProfileForm({ ...profileForm, positioning: e.target.value })} />
+          </label>
+          <label>
+            目标读者
+            <textarea value={profileForm.targetReaders} onChange={(e) => setProfileForm({ ...profileForm, targetReaders: e.target.value })} />
+          </label>
+          <label>
+            常用语气
+            <textarea value={profileForm.tone} onChange={(e) => setProfileForm({ ...profileForm, tone: e.target.value })} />
+          </label>
+          <label>
+            禁用表达
+            <textarea value={profileForm.bannedExpressions} onChange={(e) => setProfileForm({ ...profileForm, bannedExpressions: e.target.value })} />
+          </label>
+          <label>
+            标题风格
+            <textarea value={profileForm.titleStyle} onChange={(e) => setProfileForm({ ...profileForm, titleStyle: e.target.value })} />
+          </label>
+          <label>
+            内容结构模板
+            <textarea value={profileForm.structureTemplate} onChange={(e) => setProfileForm({ ...profileForm, structureTemplate: e.target.value })} />
+          </label>
+          <label>
+            竞品账号
+            <input value={profileForm.competitors} onChange={(e) => setProfileForm({ ...profileForm, competitors: e.target.value })} />
+          </label>
+          <button className="btn primary" onClick={onSave}>
+            <Save size={16} /> 保存画像
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function ProfileField({ title, value }: { title: string; value: string }) {
+  return (
+    <div className="profile-field">
+      <strong>{title}</strong>
+      <p>{value || "未设置"}</p>
+    </div>
   );
 }
 

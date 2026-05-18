@@ -685,6 +685,67 @@ select:focus {
   margin-top: 14px;
 }
 
+.profile-selector {
+  padding-bottom: 14px;
+  border-bottom: 1px solid rgba(210, 210, 215, 0.68);
+}
+
+.profile-brief {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid rgba(210, 210, 215, 0.78);
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.profile-brief strong {
+  font-size: 13px;
+}
+
+.profile-brief span {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.profile-list,
+.profile-form {
+  display: grid;
+  gap: 12px;
+}
+
+.profile-card {
+  display: grid;
+  gap: 10px;
+  padding: 15px;
+  border: 1px solid rgba(210, 210, 215, 0.82);
+  border-radius: 8px;
+  background: #fbfbfd;
+}
+
+.profile-card.active {
+  border-color: rgba(0, 113, 227, 0.36);
+  background: rgba(0, 113, 227, 0.06);
+}
+
+.profile-field {
+  display: grid;
+  gap: 4px;
+}
+
+.profile-field strong {
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.profile-field p {
+  color: var(--soft);
+  font-size: 13px;
+  line-height: 1.62;
+}
+
 .workflow-box {
   margin-bottom: 16px;
 }
