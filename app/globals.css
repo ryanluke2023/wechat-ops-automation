@@ -685,6 +685,117 @@ select:focus {
   margin-top: 14px;
 }
 
+.workflow-box {
+  margin-bottom: 16px;
+}
+
+.workflow-steps {
+  display: grid;
+  gap: 7px;
+  margin-bottom: 12px;
+}
+
+.workflow-step {
+  display: grid;
+  grid-template-columns: 24px 1fr;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.workflow-step span {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border: 1px solid #d2d2d7;
+  border-radius: 999px;
+  background: #ffffff;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.workflow-step.done {
+  color: var(--text);
+}
+
+.workflow-step.done span {
+  border-color: rgba(52, 199, 89, 0.35);
+  background: rgba(52, 199, 89, 0.12);
+  color: #1f7a35;
+}
+
+.workflow-summary {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.workflow-summary p {
+  padding: 9px 10px;
+  border: 1px solid rgba(210, 210, 215, 0.78);
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--soft);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.workflow-log {
+  display: grid;
+  gap: 6px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.workflow-log li {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.workflow-choice {
+  background: #ffffff;
+}
+
+.choice-list {
+  display: grid;
+  gap: 8px;
+}
+
+.choice-item {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px;
+  border: 1px solid rgba(210, 210, 215, 0.78);
+  border-radius: 8px;
+  background: #fbfbfd;
+  color: var(--soft);
+  text-align: left;
+}
+
+.choice-item span {
+  line-height: 1.55;
+}
+
+.choice-item strong {
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.choice-item.active {
+  border-color: rgba(0, 113, 227, 0.36);
+  background: rgba(0, 113, 227, 0.08);
+  color: var(--text);
+}
+
 .hero-score {
   display: grid;
   gap: 4px;

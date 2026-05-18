@@ -40,12 +40,23 @@ import {
 type StudioTab = "topics" | "article" | "titles" | "package";
 type EditorMode = "edit" | "preview";
 type EditorAction = "rewrite-paragraph" | "rewrite-heading" | "extract-quotes" | "expand" | "compress" | "change-style";
+type WorkflowStep = "topic" | "title" | "article" | "package" | "calendar" | "review" | "template";
 type DraftVersion = {
   id: string;
   title: string;
   content: string;
   createdAt: string;
 };
+
+const workflowSteps: { key: WorkflowStep; label: string }[] = [
+  { key: "topic", label: "生成选题" },
+  { key: "title", label: "选择选题" },
+  { key: "article", label: "选择标题" },
+  { key: "package", label: "生成文章" },
+  { key: "calendar", label: "生成发布包" },
+  { key: "review", label: "加入日历" },
+  { key: "template", label: "复盘沉淀" }
+];
 
 const studioTabs: { key: StudioTab; label: string; icon: typeof Sparkles }[] = [
   { key: "topics", label: "选题", icon: Sparkles },
@@ -167,6 +178,10 @@ function findCurrentParagraph(content: string, cursor: number) {
   return { start, end, text: content.slice(start, end) };
 }
 
+function normalizeTitles(data: TitleResult[] | { data: TitleResult[] }) {
+  return Array.isArray(data) ? data : data.data;
+}
+
 export default function Home() {
   const editorRef = useRef<HTMLTextAreaElement>(null);
   const [active, setActive] = useState<SectionKey>("topics");
@@ -179,6 +194,9 @@ export default function Home() {
   const [selectedText, setSelectedText] = useState("");
   const [draftVersions, setDraftVersions] = useState<DraftVersion[]>([]);
   const [draftSavedAt, setDraftSavedAt] = useState("");
+  const [selectedWorkflowTopic, setSelectedWorkflowTopic] = useState("");
+  const [selectedWorkflowTitle, setSelectedWorkflowTitle] = useState("");
+  const [workflowLog, setWorkflowLog] = useState<string[]>([]);
 
   const [topicForm, setTopicForm] = useState({
     domain: "AI、财经、科技",
@@ -215,6 +233,18 @@ export default function Home() {
   const [newItem, setNewItem] = useState({ category: "选题", title: "", content: "", tags: "" });
 
   const activeMode = modelModes.find((mode) => mode.key === modelMode) ?? modelModes[0];
+  const workflowState = useMemo<Record<WorkflowStep, boolean>>(
+    () => ({
+      topic: Boolean(topicResult),
+      title: Boolean(selectedWorkflowTopic),
+      article: Boolean(selectedWorkflowTitle),
+      package: Boolean(articleResult || editorContent),
+      calendar: Boolean(publishPackage),
+      review: calendar.some((item) => item.topic === (selectedWorkflowTopic || articleForm.topic)),
+      template: library.some((item) => item.category === "复盘模板" || item.tags.includes("复盘模板"))
+    }),
+    [articleForm.topic, articleResult, calendar, editorContent, library, publishPackage, selectedWorkflowTitle, selectedWorkflowTopic, topicResult]
+  );
   const filteredLibrary = useMemo(() => {
     const text = query.trim().toLowerCase();
     if (!text) return library;
@@ -263,6 +293,27 @@ export default function Home() {
 
   function remember(text: string) {
     setHistory((items) => [text, ...items].slice(0, 8));
+  }
+
+  function appendWorkflowLog(text: string) {
+    setWorkflowLog((items) => [text, ...items].slice(0, 6));
+  }
+
+  function selectWorkflowTopic(topic: string) {
+    const nextArticleForm = { ...articleForm, topic };
+    setSelectedWorkflowTopic(topic);
+    setSelectedWorkflowTitle("");
+    setArticleForm(nextArticleForm);
+    setActive("titles");
+    appendWorkflowLog(`已选择选题：${topic}`);
+    setToast("选题已进入标题实验");
+  }
+
+  function selectWorkflowTitle(title: string) {
+    setSelectedWorkflowTitle(title);
+    setActive("article");
+    appendWorkflowLog(`已选择标题：${title}`);
+    setToast("标题已锁定，下一步生成文章");
   }
 
   function saveDraftVersion(label = "手动保存", nextContent = editorContent) {
@@ -402,36 +453,40 @@ export default function Home() {
       setTopicResult(data);
       setActive("topics");
       remember(`选题：${topicForm.domain}`);
+      appendWorkflowLog("已生成选题池，请选择一个选题");
     } finally {
       setLoading(null);
     }
   }
 
-  async function generateArticle() {
+  async function generateArticle(title = selectedWorkflowTitle) {
     setLoading("article");
     try {
       const data = await postJson<ArticleResult>("/api/generate-article", { ...articleForm, modelMode });
-      setArticleResult(data);
-      setEditorContent(articleToMarkdown(data));
+      const article = title ? { ...data, title } : data;
+      setArticleResult(article);
+      setEditorContent(articleToMarkdown(article));
       setActive("article");
-      remember(`文章：${data.title}`);
+      remember(`文章：${article.title}`);
+      appendWorkflowLog("已生成文章初稿，可继续生成发布包");
     } finally {
       setLoading(null);
     }
   }
 
-  async function generateTitles() {
+  async function generateTitles(topic = articleForm.topic) {
     setLoading("titles");
     try {
       const data = await postJson<TitleResult[] | { data: TitleResult[] }>("/api/generate-title", {
-        topic: articleForm.topic,
+        topic,
         audience: articleForm.audience,
         modelMode
       });
-      const titles = Array.isArray(data) ? data : data.data;
+      const titles = normalizeTitles(data);
       setTitleResult(titles);
       setActive("titles");
-      remember(`标题实验：${articleForm.topic}`);
+      remember(`标题实验：${topic}`);
+      appendWorkflowLog("已生成标题组，请选择一个标题");
     } finally {
       setLoading(null);
     }
@@ -448,6 +503,7 @@ export default function Home() {
       setPublishPackage(data);
       setActive("package");
       remember(`发布包：${articleForm.topic}`);
+      appendWorkflowLog("已生成发布包，可加入运营日历");
     } finally {
       setLoading(null);
     }
@@ -467,22 +523,28 @@ export default function Home() {
         audience: nextArticleForm.audience,
         modelMode
       });
-      const titleList = Array.isArray(titles) ? titles : titles.data;
+      const titleList = normalizeTitles(titles);
       setTitleResult(titleList);
+      const selectedTitle = titleList[0]?.title || selectedTopic;
+      setSelectedWorkflowTopic(selectedTopic);
+      setSelectedWorkflowTitle(selectedTitle);
 
       const article = await postJson<ArticleResult>("/api/generate-article", { ...nextArticleForm, modelMode });
-      setArticleResult(article);
-      setEditorContent(articleToMarkdown(article));
+      const titledArticle = { ...article, title: selectedTitle };
+      setArticleResult(titledArticle);
+      setEditorContent(articleToMarkdown(titledArticle));
 
       const pack = await postJson<PublishPackage>("/api/generate-publish-package", {
-        article,
+        article: titledArticle,
         topic: selectedTopic,
         modelMode
       });
       setPublishPackage(pack);
+      addWorkflowCalendarItem(selectedTopic, selectedTitle, true);
       setActive("package");
       remember(`流水线：${selectedTopic}`);
-      setToast("一键流水线已完成");
+      appendWorkflowLog("自动流水线已完成：选题、标题、文章、发布包、日历");
+      setToast("一键流水线已完成并加入日历");
     } finally {
       setLoading(null);
     }
@@ -495,9 +557,50 @@ export default function Home() {
       setPerformance(data);
       setActive("review");
       remember(`复盘评分：${data.score}`);
+      appendWorkflowLog("已生成复盘报告，可沉淀为模板");
     } finally {
       setLoading(null);
     }
+  }
+
+  function addWorkflowCalendarItem(
+    topic = selectedWorkflowTopic || articleForm.topic,
+    title = selectedWorkflowTitle || articleResult?.title || articleForm.topic,
+    hasPackage = Boolean(publishPackage)
+  ) {
+    setCalendar((items) => [
+      {
+        id: crypto.randomUUID(),
+        date: new Date().toISOString().slice(0, 10),
+        topic,
+        status: hasPackage ? "待发布" : "写作中",
+        platform: "公众号 / 小红书 / 短视频",
+        owner: title.slice(0, 24)
+      },
+      ...items
+    ]);
+    appendWorkflowLog("已加入运营日历");
+    setToast("已加入运营日历");
+  }
+
+  function saveReviewAsTemplate() {
+    if (!performance) {
+      setToast("请先生成复盘报告");
+      return;
+    }
+    addToLibrary(
+      "复盘模板",
+      `复盘模板 / ${selectedWorkflowTopic || articleForm.topic}`.slice(0, 42),
+      [
+        `评分：${performance.score}`,
+        `标题分析：${performance.titleAnalysis}`,
+        `选题分析：${performance.topicAnalysis}`,
+        `可复用模式：${performance.reusablePatterns.join(" / ")}`,
+        `下次优化：${performance.improvements.join(" / ")}`
+      ].join("\n"),
+      ["复盘模板", "流水线"]
+    );
+    appendWorkflowLog("复盘结论已沉淀为模板");
   }
 
   function addCalendarItem() {
@@ -639,6 +742,16 @@ export default function Home() {
               {topicResult && (
                 <div className="result">
                   <ResultList title="今日选题推荐" items={topicResult.recommendations} onSave={addToLibrary} />
+                  <WorkflowChoiceList
+                    title="流水线选题池"
+                    items={topicResult.recommendations}
+                    selected={selectedWorkflowTopic}
+                    actionLabel="选用并生成标题"
+                    onSelect={(item) => {
+                      selectWorkflowTopic(item);
+                      generateTitles(item);
+                    }}
+                  />
                   <ResultList title="爆款角度" items={topicResult.angles} onSave={addToLibrary} />
                   <ResultList title="争议点" items={topicResult.controversy} onSave={addToLibrary} />
                   <ResultList title="情绪钩子" items={topicResult.hooks} onSave={addToLibrary} />
@@ -751,30 +864,42 @@ export default function Home() {
               empty="基于当前文章选题生成多组标题。"
             >
               {titleResult.length > 0 && (
-                <table className="title-table">
-                  <thead>
-                    <tr>
-                      <th>类型</th>
-                      <th>标题</th>
-                      <th>评分</th>
-                      <th>风险</th>
-                      <th>人群</th>
-                      <th>理由</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {titleResult.map((item) => (
-                      <tr key={item.type}>
-                        <td>{item.type}</td>
-                        <td>{item.title}</td>
-                        <td className="score">{item.score}</td>
-                        <td>{item.risk}</td>
-                        <td>{item.audience}</td>
-                        <td>{item.reason}</td>
+                <div className="result">
+                  <WorkflowChoiceList
+                    title="流水线标题组"
+                    items={titleResult.map((item) => item.title)}
+                    selected={selectedWorkflowTitle}
+                    actionLabel="选用并生成文章"
+                    onSelect={(item) => {
+                      selectWorkflowTitle(item);
+                      generateArticle(item);
+                    }}
+                  />
+                  <table className="title-table">
+                    <thead>
+                      <tr>
+                        <th>类型</th>
+                        <th>标题</th>
+                        <th>评分</th>
+                        <th>风险</th>
+                        <th>人群</th>
+                        <th>理由</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {titleResult.map((item) => (
+                        <tr key={item.type}>
+                          <td>{item.type}</td>
+                          <td>{item.title}</td>
+                          <td className="score">{item.score}</td>
+                          <td>{item.risk}</td>
+                          <td>{item.audience}</td>
+                          <td>{item.reason}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               )}
             </ResultPanel>
           )}
@@ -795,7 +920,17 @@ export default function Home() {
                     <ResultList title="小红书标题" items={publishPackage.xiaohongshuTitles} onSave={addToLibrary} />
                     <ResultList title="短视频口播大纲" items={publishPackage.shortVideoOutline} onSave={addToLibrary} />
                   </div>
-                  <textarea readOnly value={publishPackage.markdown} className="editor-area" />
+                  <div className="editor-stack">
+                    <div className="actions">
+                      <button className="btn primary" onClick={() => addWorkflowCalendarItem()}>
+                        <CalendarDays size={16} /> 加入运营日历
+                      </button>
+                      <button className="btn" onClick={() => setActive("review")}>
+                        <BarChart3 size={16} /> 去复盘
+                      </button>
+                    </div>
+                    <textarea readOnly value={publishPackage.markdown} className="editor-area" />
+                  </div>
                 </div>
               )}
             </ResultPanel>
@@ -835,6 +970,9 @@ export default function Home() {
                   <ResultList title="下次优化建议" items={performance.improvements} onSave={addToLibrary} />
                   <ResultList title="可复用模式" items={performance.reusablePatterns} onSave={addToLibrary} />
                   <ResultList title="应避免的问题" items={performance.avoid} onSave={addToLibrary} />
+                  <button className="btn primary" onClick={saveReviewAsTemplate}>
+                    <Save size={16} /> 沉淀为模板
+                  </button>
                 </div>
               )}
             </ResultPanel>
@@ -903,8 +1041,23 @@ export default function Home() {
             {loading === "pipeline" ? <Loader2 size={16} /> : <Sparkles size={16} />}
             一键生成流水线
           </button>
-          <span className="muted">自动完成：选题 → 标题 → 文章 → 发布包</span>
+          <span className="muted">自动完成：选题 → 标题 → 文章 → 发布包 → 日历</span>
         </div>
+
+        <WorkflowPanel
+          state={workflowState}
+          logs={workflowLog}
+          selectedTopic={selectedWorkflowTopic}
+          selectedTitle={selectedWorkflowTitle}
+          onStart={generateTopic}
+          onTitles={() => generateTitles(selectedWorkflowTopic || articleForm.topic)}
+          onArticle={() => generateArticle()}
+          onPackage={generatePackage}
+          onCalendar={() => addWorkflowCalendarItem()}
+          onReview={analyzePerformance}
+          onTemplate={saveReviewAsTemplate}
+          loading={loading}
+        />
 
         {active === "topics" && (
           <div className="rail-form">
@@ -959,10 +1112,10 @@ export default function Home() {
               />
             </label>
             <div className="actions vertical-actions">
-              <button className="btn primary" disabled={loading === "article"} onClick={generateArticle}>
+              <button className="btn primary" disabled={loading === "article"} onClick={() => generateArticle()}>
                 {loading === "article" ? <Loader2 size={16} /> : <FileText size={16} />} 生成文章
               </button>
-              <button className="btn" disabled={loading === "titles"} onClick={generateTitles}>
+              <button className="btn" disabled={loading === "titles"} onClick={() => generateTitles()}>
                 <MessageSquareText size={16} /> 标题实验
               </button>
               <button className="btn" disabled={loading === "package"} onClick={generatePackage}>
@@ -996,6 +1149,111 @@ export default function Home() {
         </div>
       </aside>
     </main>
+  );
+}
+
+function WorkflowPanel({
+  state,
+  logs,
+  selectedTopic,
+  selectedTitle,
+  onStart,
+  onTitles,
+  onArticle,
+  onPackage,
+  onCalendar,
+  onReview,
+  onTemplate,
+  loading
+}: {
+  state: Record<WorkflowStep, boolean>;
+  logs: string[];
+  selectedTopic: string;
+  selectedTitle: string;
+  onStart: () => void;
+  onTitles: () => void;
+  onArticle: () => void;
+  onPackage: () => void;
+  onCalendar: () => void;
+  onReview: () => void;
+  onTemplate: () => void;
+  loading: string | null;
+}) {
+  return (
+    <div className="result-section workflow-box">
+      <div className="row-between">
+        <h3 className="section-heading">生成工作流</h3>
+        <span className="muted">{workflowSteps.filter((step) => state[step.key]).length}/7</span>
+      </div>
+      <div className="workflow-steps">
+        {workflowSteps.map((step, index) => (
+          <div key={step.key} className={state[step.key] ? "workflow-step done" : "workflow-step"}>
+            <span>{index + 1}</span>
+            <strong>{step.label}</strong>
+          </div>
+        ))}
+      </div>
+      <div className="workflow-summary">
+        <p>{selectedTopic || "尚未选择选题"}</p>
+        <p>{selectedTitle || "尚未选择标题"}</p>
+      </div>
+      <div className="actions vertical-actions">
+        <button className="btn" disabled={loading === "topics"} onClick={onStart}>
+          1. 生成选题池
+        </button>
+        <button className="btn" disabled={!selectedTopic || loading === "titles"} onClick={onTitles}>
+          2. 生成标题组
+        </button>
+        <button className="btn" disabled={!selectedTitle || loading === "article"} onClick={onArticle}>
+          3. 生成文章
+        </button>
+        <button className="btn" disabled={!state.package || loading === "package"} onClick={onPackage}>
+          4. 生成发布包
+        </button>
+        <button className="btn" disabled={!state.calendar} onClick={onCalendar}>
+          5. 加入运营日历
+        </button>
+        <button className="btn" disabled={loading === "review"} onClick={onReview}>
+          6. 复盘
+        </button>
+        <button className="btn primary" disabled={!state.review} onClick={onTemplate}>
+          7. 沉淀为模板
+        </button>
+      </div>
+      <ul className="workflow-log">
+        {(logs.length ? logs : ["等待启动工作流"]).map((item) => (
+          <li key={item}>{item}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function WorkflowChoiceList({
+  title,
+  items,
+  selected,
+  actionLabel,
+  onSelect
+}: {
+  title: string;
+  items: string[];
+  selected: string;
+  actionLabel: string;
+  onSelect: (item: string) => void;
+}) {
+  return (
+    <div className="result-section workflow-choice">
+      <h3 className="section-heading">{title}</h3>
+      <div className="choice-list">
+        {items.map((item) => (
+          <button key={item} className={selected === item ? "choice-item active" : "choice-item"} onClick={() => onSelect(item)}>
+            <span>{item}</span>
+            <strong>{selected === item ? "已选" : actionLabel}</strong>
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }
 
