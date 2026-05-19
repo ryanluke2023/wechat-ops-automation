@@ -806,6 +806,56 @@ select:focus {
   gap: 12px;
 }
 
+.profile-import-panel {
+  grid-column: 1 / -1;
+}
+
+.profile-import-grid {
+  display: grid;
+  grid-template-columns: minmax(360px, 1.2fr) minmax(260px, 0.8fr);
+  gap: 14px;
+}
+
+.profile-import-area {
+  min-height: 260px;
+  font-family: "SF Mono", "Cascadia Code", "SFMono-Regular", monospace;
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.file-button {
+  position: relative;
+  overflow: hidden;
+}
+
+.file-button input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.profile-import-preview {
+  display: grid;
+  gap: 10px;
+}
+
+.profile-import-item {
+  display: grid;
+  gap: 5px;
+  padding: 12px;
+  border: 1px solid rgba(210, 210, 215, 0.78);
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.profile-import-item span,
+.profile-import-item small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
 .profile-card {
   display: grid;
   gap: 10px;
@@ -1199,6 +1249,7 @@ select:focus {
   .command-strip,
   .editor-grid,
   .image-grid,
+  .profile-import-grid,
   .metric-grid {
     grid-template-columns: 1fr;
   }

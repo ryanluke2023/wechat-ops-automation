@@ -358,6 +358,97 @@ function parsePerformanceRows(raw: string): PerformanceRow[] {
   });
 }
 
+function normalizeProfileHeader(header: string) {
+  const value = header.trim().toLowerCase();
+  if (/账号|账户|名称|name/.test(value)) return "name";
+  if (/定位|position/.test(value)) return "positioning";
+  if (/读者|人群|用户|受众|audience|reader/.test(value)) return "targetReaders";
+  if (/语气|口吻|tone|voice/.test(value)) return "tone";
+  if (/禁用|避免|黑名单|banned|forbid/.test(value)) return "bannedExpressions";
+  if (/标题|title/.test(value)) return "titleStyle";
+  if (/结构|模板|structure|template/.test(value)) return "structureTemplate";
+  if (/竞品|对标|competitor/.test(value)) return "competitors";
+  return value;
+}
+
+function profileFromFields(fields: Partial<Record<keyof typeof blankProfileForm, string>>) {
+  const name = fields.name?.trim();
+  if (!name) return null;
+  return {
+    id: crypto.randomUUID(),
+    name,
+    positioning: fields.positioning?.trim() || "",
+    targetReaders: fields.targetReaders?.trim() || "",
+    tone: fields.tone?.trim() || "",
+    bannedExpressions: fields.bannedExpressions?.trim() || "",
+    titleStyle: fields.titleStyle?.trim() || "",
+    structureTemplate: fields.structureTemplate?.trim() || "",
+    competitors: fields.competitors?.trim() || "",
+    createdAt: new Date().toISOString().slice(0, 10)
+  } satisfies AccountProfile;
+}
+
+function parseProfileCsv(raw: string) {
+  const lines = raw.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  if (lines.length < 2) return [];
+  const headers = splitDelimitedLine(lines[0]).map(normalizeProfileHeader);
+  if (!headers.includes("name")) return [];
+  return lines
+    .slice(1)
+    .map((line) => {
+      const cells = splitDelimitedLine(line);
+      const fields = Object.fromEntries(headers.map((header, index) => [header, cells[index] || ""])) as Partial<Record<keyof typeof blankProfileForm, string>>;
+      return profileFromFields(fields);
+    })
+    .filter(Boolean) as AccountProfile[];
+}
+
+function parseProfileBlock(block: string) {
+  const fields: Partial<Record<keyof typeof blankProfileForm, string>> = {};
+  const lines = block.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  let currentKey: keyof typeof blankProfileForm | null = null;
+
+  for (const line of lines) {
+    const match = line.match(/^([^:：]{2,18})[:：]\s*(.*)$/);
+    if (match) {
+      const key = normalizeProfileHeader(match[1]) as keyof typeof blankProfileForm;
+      if (key in blankProfileForm) {
+        currentKey = key;
+        fields[key] = [fields[key], match[2]].filter(Boolean).join("\n");
+        continue;
+      }
+    }
+
+    if (!fields.name && /^#/.test(line)) {
+      fields.name = line.replace(/^#+\s*/, "");
+      currentKey = null;
+      continue;
+    }
+
+    if (currentKey) {
+      fields[currentKey] = [fields[currentKey], line].filter(Boolean).join("\n");
+    } else if (!fields.name) {
+      fields.name = line.replace(/^账号[：:]\s*/, "");
+    } else if (!fields.positioning) {
+      fields.positioning = line;
+    }
+  }
+
+  return profileFromFields(fields);
+}
+
+function parseBatchProfiles(raw: string) {
+  const text = raw.trim();
+  if (!text) return [];
+  const csvProfiles = parseProfileCsv(text);
+  if (csvProfiles.length) return csvProfiles;
+
+  return text
+    .split(/\n\s*(?:---+|={3,})\s*\n|\n{2,}(?=(?:账号(?:名称)?|账户|#)[:：\s])/g)
+    .map(parseProfileBlock)
+    .filter(Boolean) as AccountProfile[];
+}
+
 function analyzeRows(rows: PerformanceRow[]): PerformanceAnalysis | null {
   if (!rows.length) return null;
   const totals = rows.reduce(
@@ -400,6 +491,29 @@ function samplePerformanceCsv() {
     "2026-05-14,别再只追热点了,选题策略,3100,166,32,72,140,48,17,46",
     "2026-05-15,一篇文章拆成四个平台内容,内容分发,5200,310,88,166,240,112,24,58",
     "2026-05-16,公众号标题实验的 8 个模板,标题实验,2800,140,26,54,120,33,15,42"
+  ].join("\n");
+}
+
+function sampleProfileImportText() {
+  return [
+    "账号名称：AI财经趋势号",
+    "账号定位：面向内容创业者和企业新媒体负责人的 AI 财经趋势分析号，强调判断、结构和可执行清单。",
+    "目标读者：个人 IP、企业新媒体负责人、内容创业者、关注 AI 商业化的知识型读者。",
+    "常用语气：冷静、克制、专业，有 Bloomberg / Wall Street Journal 的信息密度。",
+    "禁用表达：遥遥领先、颠覆一切、普通人逆袭、闭眼入、保姆级、全网最全。",
+    "标题风格：反常识判断 + 明确收益 + 时间窗口，标题要有冲突但不夸张。",
+    "内容结构模板：开头给判断 -> 三个底层变量 -> 一个案例/数据点 -> 风险提醒 -> 行动清单 -> 金句收束。",
+    "竞品账号：晚点 LatePost、远川研究所、硅星人、半佛仙人",
+    "",
+    "---",
+    "账号名称：本地生活增长号",
+    "账号定位：帮助门店和本地品牌用内容获客的实战运营号。",
+    "目标读者：餐饮店主、本地服务商、区域品牌运营负责人。",
+    "常用语气：直接、实战、少概念，多案例。",
+    "禁用表达：躺赚、稳赚、割韭菜、暴富。",
+    "标题风格：问题场景 + 具体结果 + 门店案例。",
+    "内容结构模板：痛点 -> 门店案例 -> 操作步骤 -> 成本收益 -> 下周动作。",
+    "竞品账号：见实、运营研究社"
   ].join("\n");
 }
 
@@ -582,6 +696,22 @@ export default function Home() {
       audience: profile.targetReaders || form.audience
     }));
     setToast(`已切换画像：${profile.name}`);
+  }
+
+  function importAccountProfiles(items: AccountProfile[]) {
+    if (!items.length) {
+      setToast("未识别到可导入的账号画像");
+      return;
+    }
+    const existingNames = new Set(profiles.map((profile) => profile.name.trim().toLowerCase()));
+    const nextItems = items.filter((profile) => !existingNames.has(profile.name.trim().toLowerCase()));
+    if (!nextItems.length) {
+      setToast("导入内容与现有画像重复");
+      return;
+    }
+    setProfiles((current) => [...nextItems, ...current]);
+    setSelectedProfileId(nextItems[0].id);
+    setToast(`已导入 ${nextItems.length} 个账号画像`);
   }
 
   function appendWorkflowLog(text: string) {
@@ -1389,6 +1519,7 @@ export default function Home() {
               setProfileForm={setProfileForm}
               onApply={applyProfile}
               onSave={saveAccountProfile}
+              onImport={importAccountProfiles}
               onDelete={(id) => {
                 setProfiles((items) => items.filter((profile) => profile.id !== id));
                 if (selectedProfileId === id) setSelectedProfileId(profiles.find((profile) => profile.id !== id)?.id || "");
@@ -1926,6 +2057,7 @@ function AccountProfilesPanel({
   setProfileForm,
   onApply,
   onSave,
+  onImport,
   onDelete
 }: {
   profiles: AccountProfile[];
@@ -1934,8 +2066,17 @@ function AccountProfilesPanel({
   setProfileForm: React.Dispatch<React.SetStateAction<typeof blankProfileForm>>;
   onApply: (profile: AccountProfile) => void;
   onSave: () => void;
+  onImport: (profiles: AccountProfile[]) => void;
   onDelete: (id: string) => void;
 }) {
+  const [batchText, setBatchText] = useState("");
+  const parsedProfiles = useMemo(() => parseBatchProfiles(batchText), [batchText]);
+
+  async function importProfileFile(file?: File) {
+    if (!file) return;
+    setBatchText(await file.text());
+  }
+
   return (
     <div className="grid two">
       <section className="panel">
@@ -2012,6 +2153,55 @@ function AccountProfilesPanel({
           <button className="btn primary" onClick={onSave}>
             <Save size={16} /> 保存画像
           </button>
+        </div>
+      </section>
+
+      <section className="panel profile-import-panel">
+        <div className="panel-title">
+          <div>
+            <h2>批量导入画像</h2>
+            <span className="muted">支持 CSV 或带字段标签的多账号文本，系统会自动识别填充。</span>
+          </div>
+          <span className="badge">{parsedProfiles.length} 个可导入</span>
+        </div>
+        <div className="profile-import-grid">
+          <label>
+            粘贴账号画像 / CSV
+            <textarea
+              className="profile-import-area"
+              value={batchText}
+              placeholder={sampleProfileImportText()}
+              onChange={(event) => setBatchText(event.target.value)}
+            />
+          </label>
+          <div className="actions">
+            <label className="btn ghost file-button">
+              上传 CSV / TXT
+              <input type="file" accept=".csv,.txt,.md,text/csv,text/plain" onChange={(event) => importProfileFile(event.target.files?.[0])} />
+            </label>
+            <button className="btn" onClick={() => setBatchText(sampleProfileImportText())}>
+              填入示例
+            </button>
+            <button
+              className="btn primary"
+              disabled={!parsedProfiles.length}
+              onClick={() => {
+                onImport(parsedProfiles);
+                setBatchText("");
+              }}
+            >
+              <Save size={16} /> 导入画像
+            </button>
+          </div>
+          <div className="profile-import-preview">
+            {(parsedProfiles.length ? parsedProfiles : parseBatchProfiles(sampleProfileImportText()).slice(0, 1)).slice(0, 4).map((profile) => (
+              <div className="profile-import-item" key={`${profile.name}-${profile.positioning}`}>
+                <strong>{profile.name}</strong>
+                <span>{profile.positioning || "未识别账号定位"}</span>
+                <small>{profile.targetReaders || "未识别目标读者"}</small>
+              </div>
+            ))}
+          </div>
         </div>
       </section>
     </div>
