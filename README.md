@@ -11,7 +11,7 @@
 - 发布包：生成 Markdown、公众号排版版本、摘要、封面图提示词、文中配图提示词、朋友圈文案、小红书标题和短视频大纲。
 - 图片生成：提供封面图、海报图、文中配图生成入口；生成失败时保留提示词兜底。
 - 账号画像：保存账号定位、目标读者、常用语气、禁用表达、标题风格、结构模板和竞品账号。
-- 模型与 API 设置：维护 OpenAI Key、DeepSeek Key、图片模型、各模式默认模型、连通性测试和失败兜底开关。
+- 模型与 API 设置：维护 OpenAI、DeepSeek、OpenRouter、SiliconFlow、自定义 OpenAI-compatible 网关、图片模型、各模式默认 provider / 模型、连通性测试和失败兜底开关。
 - 数据复盘：支持 CSV 导入、粘贴后台数据、趋势图、高表现选题识别和下周策略建议。
 - 素材库：保存选题、标题、金句、案例和图片提示词，支持搜索与标签。
 
@@ -64,7 +64,7 @@
 - TypeScript
 - Prisma
 - SQLite
-- DeepSeek API / OpenAI Responses API 预留接入
+- DeepSeek API / OpenAI Responses API / OpenAI-compatible API 接入
 
 ## 本地运行
 
@@ -125,12 +125,23 @@ OPENAI_IMAGE_MODEL=gpt-image-1
 OPENAI_IMAGE_QUALITY=medium
 DEEPSEEK_API_KEY=
 DEEPSEEK_MODEL=deepseek-v4-flash
+OPENROUTER_API_KEY=
+OPENROUTER_MODEL=openai/gpt-4o-mini
+OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+SILICONFLOW_API_KEY=
+SILICONFLOW_MODEL=deepseek-ai/DeepSeek-V3
+SILICONFLOW_BASE_URL=https://api.siliconflow.cn/v1
+CUSTOM_API_KEY=
+CUSTOM_MODEL=
+CUSTOM_BASE_URL=
 ```
 
 推荐：
 
 - 日常中文内容生成：配置 `DEEPSEEK_API_KEY`
 - 高质量终稿和复杂结构化输出：配置 `OPENAI_API_KEY`
+- 多模型路由、海外模型或备用模型池：配置 `OPENROUTER_API_KEY`
+- 国内 OpenAI-compatible 模型网关：配置 `SILICONFLOW_API_KEY` 或 `CUSTOM_API_KEY`
 - 图片生成扩展：配置 `OPENAI_API_KEY`
 
 ## API 路由
@@ -168,7 +179,7 @@ npm run build
 
 - 三栏工作台 UI
 - 模型模式切换
-- DeepSeek / OpenAI provider 选择逻辑
+- DeepSeek / OpenAI / OpenRouter / SiliconFlow / 自定义 provider 选择逻辑
 - 文章编辑器和版本历史
 - 一键生成流水线
 - 真实图片生成入口和提示词兜底

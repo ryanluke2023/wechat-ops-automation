@@ -10,14 +10,25 @@ export type SectionKey =
   | "settings";
 
 export type ModelMode = "economy" | "quality" | "image";
+export type ModelProvider = "deepseek" | "openai" | "openrouter" | "siliconflow" | "custom";
 
 export type ApiSettings = {
   openAIKey: string;
   deepSeekKey: string;
+  openRouterKey: string;
+  siliconFlowKey: string;
+  customApiKey: string;
   openAIModel: string;
   deepSeekModel: string;
+  openRouterModel: string;
+  siliconFlowModel: string;
+  customModel: string;
+  openRouterBaseUrl: string;
+  siliconFlowBaseUrl: string;
+  customBaseUrl: string;
   imageModel: string;
   imageQuality: string;
+  defaultProviders: Record<ModelMode, ModelProvider>;
   defaults: Record<ModelMode, string>;
   fallbackEnabled: boolean;
 };

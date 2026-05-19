@@ -1,24 +1,38 @@
-import { modelForMode, readApiSettings } from "@/lib/api-settings";
-import { ModelMode } from "@/lib/types";
+import { modelForMode, providerForMode, readApiSettings } from "@/lib/api-settings";
+import { ApiSettings, ModelMode, ModelProvider } from "@/lib/types";
 
 const SYSTEM_PROMPT = "你是中文公众号内容运营专家。只返回可解析 JSON，不要添加 Markdown 代码块。";
 
-async function generateWithDeepSeek(prompt: string, apiKey: string, model: string) {
-  if (!apiKey) return null;
+function normalizeBaseUrl(baseUrl: string) {
+  return baseUrl.replace(/\/$/, "");
+}
 
-  const response = await fetch("https://api.deepseek.com/chat/completions", {
+async function generateWithChatCompletions({
+  apiKey,
+  baseUrl,
+  model,
+  prompt,
+  headers = {}
+}: {
+  apiKey: string;
+  baseUrl: string;
+  model: string;
+  prompt: string;
+  headers?: Record<string, string>;
+}) {
+  if (!apiKey || !baseUrl || !model) return null;
+
+  const response = await fetch(`${normalizeBaseUrl(baseUrl)}/chat/completions`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`
+      Authorization: `Bearer ${apiKey}`,
+      ...headers
     },
     body: JSON.stringify({
       model,
       messages: [
-        {
-          role: "system",
-          content: SYSTEM_PROMPT
-        },
+        { role: "system", content: SYSTEM_PROMPT },
         { role: "user", content: prompt }
       ],
       temperature: 0.75
@@ -31,7 +45,7 @@ async function generateWithDeepSeek(prompt: string, apiKey: string, model: strin
 }
 
 async function generateWithOpenAI(prompt: string, apiKey: string, model: string) {
-  if (!apiKey) return null;
+  if (!apiKey || !model) return null;
 
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
@@ -42,10 +56,7 @@ async function generateWithOpenAI(prompt: string, apiKey: string, model: string)
     body: JSON.stringify({
       model,
       input: [
-        {
-          role: "system",
-          content: SYSTEM_PROMPT
-        },
+        { role: "system", content: SYSTEM_PROMPT },
         { role: "user", content: prompt }
       ]
     })
@@ -56,19 +67,76 @@ async function generateWithOpenAI(prompt: string, apiKey: string, model: string)
   return data.output_text as string;
 }
 
+function modelForProvider(settings: ApiSettings, provider: ModelProvider, preferredModel?: string) {
+  if (preferredModel) return preferredModel;
+  if (provider === "openai") return settings.openAIModel;
+  if (provider === "deepseek") return settings.deepSeekModel;
+  if (provider === "openrouter") return settings.openRouterModel;
+  if (provider === "siliconflow") return settings.siliconFlowModel;
+  return settings.customModel;
+}
+
+async function generateWithNamedProvider(settings: ApiSettings, provider: ModelProvider, prompt: string, preferredModel?: string) {
+  const model = modelForProvider(settings, provider, preferredModel);
+  if (provider === "openai") return generateWithOpenAI(prompt, settings.openAIKey, model);
+  if (provider === "deepseek") {
+    return generateWithChatCompletions({
+      apiKey: settings.deepSeekKey,
+      baseUrl: "https://api.deepseek.com",
+      model,
+      prompt
+    });
+  }
+  if (provider === "openrouter") {
+    return generateWithChatCompletions({
+      apiKey: settings.openRouterKey,
+      baseUrl: settings.openRouterBaseUrl,
+      model,
+      prompt,
+      headers: {
+        "HTTP-Referer": "http://localhost:3012",
+        "X-Title": "Wechat Ops Automation"
+      }
+    });
+  }
+  if (provider === "siliconflow") {
+    return generateWithChatCompletions({
+      apiKey: settings.siliconFlowKey,
+      baseUrl: settings.siliconFlowBaseUrl,
+      model,
+      prompt
+    });
+  }
+  return generateWithChatCompletions({
+    apiKey: settings.customApiKey,
+    baseUrl: settings.customBaseUrl,
+    model,
+    prompt
+  });
+}
+
+function fallbackProviders(primary: ModelProvider): ModelProvider[] {
+  const providers: ModelProvider[] = [primary, "deepseek", "openai", "openrouter", "siliconflow", "custom"];
+  return providers.filter(
+    (provider, index, all) => all.indexOf(provider) === index
+  );
+}
+
 export async function generateWithProvider(prompt: string, mode: ModelMode = "economy") {
   const settings = await readApiSettings();
+  const primaryProvider = providerForMode(settings, mode);
   const preferredModel = modelForMode(settings, mode);
 
-  if (mode === "quality" || mode === "image") {
-    const primary = await generateWithOpenAI(prompt, settings.openAIKey, preferredModel || settings.openAIModel);
-    if (primary || !settings.fallbackEnabled) return primary;
-    return generateWithDeepSeek(prompt, settings.deepSeekKey, settings.deepSeekModel);
+  for (const provider of fallbackProviders(primaryProvider)) {
+    try {
+      const result = await generateWithNamedProvider(settings, provider, prompt, provider === primaryProvider ? preferredModel : undefined);
+      if (result || !settings.fallbackEnabled) return result;
+    } catch (error) {
+      if (!settings.fallbackEnabled) throw error;
+    }
   }
 
-  const primary = await generateWithDeepSeek(prompt, settings.deepSeekKey, preferredModel || settings.deepSeekModel);
-  if (primary || !settings.fallbackEnabled) return primary;
-  return generateWithOpenAI(prompt, settings.openAIKey, settings.openAIModel);
+  return null;
 }
 
 export function parseProviderJson<T>(raw: string | null, fallback: T): T {

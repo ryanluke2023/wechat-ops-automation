@@ -34,6 +34,7 @@ import {
   CalendarItem,
   LibraryItem,
   ModelMode,
+  ModelProvider,
   PerformanceResult,
   PublishPackage,
   SectionKey,
@@ -87,6 +88,9 @@ type GeneratedImage = {
 type ApiSettingsForm = ApiSettings & {
   hasOpenAIKey?: boolean;
   hasDeepSeekKey?: boolean;
+  hasOpenRouterKey?: boolean;
+  hasSiliconFlowKey?: boolean;
+  hasCustomApiKey?: boolean;
 };
 type ApiTestResult = {
   name: string;
@@ -195,10 +199,24 @@ const blankProfileForm = {
 const defaultApiSettingsForm: ApiSettingsForm = {
   openAIKey: "",
   deepSeekKey: "",
+  openRouterKey: "",
+  siliconFlowKey: "",
+  customApiKey: "",
   openAIModel: "gpt-5.4-mini",
   deepSeekModel: "deepseek-v4-flash",
+  openRouterModel: "openai/gpt-4o-mini",
+  siliconFlowModel: "deepseek-ai/DeepSeek-V3",
+  customModel: "",
+  openRouterBaseUrl: "https://openrouter.ai/api/v1",
+  siliconFlowBaseUrl: "https://api.siliconflow.cn/v1",
+  customBaseUrl: "",
   imageModel: "gpt-image-1",
   imageQuality: "medium",
+  defaultProviders: {
+    economy: "deepseek",
+    quality: "openai",
+    image: "openai"
+  },
   defaults: {
     economy: "deepseek-v4-flash",
     quality: "gpt-5.4-mini",
@@ -206,7 +224,10 @@ const defaultApiSettingsForm: ApiSettingsForm = {
   },
   fallbackEnabled: true,
   hasOpenAIKey: false,
-  hasDeepSeekKey: false
+  hasDeepSeekKey: false,
+  hasOpenRouterKey: false,
+  hasSiliconFlowKey: false,
+  hasCustomApiKey: false
 };
 
 async function postJson<T>(url: string, payload: unknown): Promise<T> {
@@ -1663,6 +1684,22 @@ function ApiSettingsPanel({
       }
     }));
   };
+  const updateProvider = (mode: ModelMode, value: ModelProvider) => {
+    setSettings((current) => ({
+      ...current,
+      defaultProviders: {
+        ...current.defaultProviders,
+        [mode]: value
+      }
+    }));
+  };
+  const providerOptions: { value: ModelProvider; label: string }[] = [
+    { value: "deepseek", label: "DeepSeek" },
+    { value: "openai", label: "OpenAI" },
+    { value: "openrouter", label: "OpenRouter" },
+    { value: "siliconflow", label: "SiliconFlow" },
+    { value: "custom", label: "自定义兼容 API" }
+  ];
 
   return (
     <div className="grid two settings-grid">
@@ -1694,6 +1731,35 @@ function ApiSettingsPanel({
               onChange={(event) => setSettings((current) => ({ ...current, deepSeekKey: event.target.value }))}
             />
           </label>
+          <div className="grid three compact-grid">
+            <label>
+              OpenRouter Key
+              <input
+                type="password"
+                value={settings.openRouterKey}
+                placeholder={settings.hasOpenRouterKey ? "已保存，留空则沿用" : "sk-or-..."}
+                onChange={(event) => setSettings((current) => ({ ...current, openRouterKey: event.target.value }))}
+              />
+            </label>
+            <label>
+              SiliconFlow Key
+              <input
+                type="password"
+                value={settings.siliconFlowKey}
+                placeholder={settings.hasSiliconFlowKey ? "已保存，留空则沿用" : "sk-..."}
+                onChange={(event) => setSettings((current) => ({ ...current, siliconFlowKey: event.target.value }))}
+              />
+            </label>
+            <label>
+              自定义 API Key
+              <input
+                type="password"
+                value={settings.customApiKey}
+                placeholder={settings.hasCustomApiKey ? "已保存，留空则沿用" : "兼容 OpenAI 的 Key"}
+                onChange={(event) => setSettings((current) => ({ ...current, customApiKey: event.target.value }))}
+              />
+            </label>
+          </div>
           <div className="grid two compact-grid">
             <label>
               OpenAI 文本模型
@@ -1702,6 +1768,34 @@ function ApiSettingsPanel({
             <label>
               DeepSeek 文本模型
               <input value={settings.deepSeekModel} onChange={(event) => setSettings((current) => ({ ...current, deepSeekModel: event.target.value }))} />
+            </label>
+          </div>
+          <div className="grid three compact-grid">
+            <label>
+              OpenRouter 模型
+              <input value={settings.openRouterModel} onChange={(event) => setSettings((current) => ({ ...current, openRouterModel: event.target.value }))} />
+            </label>
+            <label>
+              SiliconFlow 模型
+              <input value={settings.siliconFlowModel} onChange={(event) => setSettings((current) => ({ ...current, siliconFlowModel: event.target.value }))} />
+            </label>
+            <label>
+              自定义模型
+              <input value={settings.customModel} onChange={(event) => setSettings((current) => ({ ...current, customModel: event.target.value }))} />
+            </label>
+          </div>
+          <div className="grid three compact-grid">
+            <label>
+              OpenRouter Base URL
+              <input value={settings.openRouterBaseUrl} onChange={(event) => setSettings((current) => ({ ...current, openRouterBaseUrl: event.target.value }))} />
+            </label>
+            <label>
+              SiliconFlow Base URL
+              <input value={settings.siliconFlowBaseUrl} onChange={(event) => setSettings((current) => ({ ...current, siliconFlowBaseUrl: event.target.value }))} />
+            </label>
+            <label>
+              自定义 Base URL
+              <input value={settings.customBaseUrl} placeholder="https://example.com/v1" onChange={(event) => setSettings((current) => ({ ...current, customBaseUrl: event.target.value }))} />
             </label>
           </div>
           <div className="grid two compact-grid">
@@ -1723,6 +1817,38 @@ function ApiSettingsPanel({
 
           <div className="model-defaults">
             <h3 className="section-heading">默认模型</h3>
+            <div className="grid three compact-grid">
+              <label>
+                经济模式 Provider
+                <select value={settings.defaultProviders.economy} onChange={(event) => updateProvider("economy", event.target.value as ModelProvider)}>
+                  {providerOptions.map((provider) => (
+                    <option key={provider.value} value={provider.value}>
+                      {provider.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                高质量模式 Provider
+                <select value={settings.defaultProviders.quality} onChange={(event) => updateProvider("quality", event.target.value as ModelProvider)}>
+                  {providerOptions.map((provider) => (
+                    <option key={provider.value} value={provider.value}>
+                      {provider.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                图片模式 Provider
+                <select value={settings.defaultProviders.image} onChange={(event) => updateProvider("image", event.target.value as ModelProvider)}>
+                  {providerOptions.map((provider) => (
+                    <option key={provider.value} value={provider.value}>
+                      {provider.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
             <label>
               经济模式默认模型
               <input value={settings.defaults.economy} onChange={(event) => updateDefaults("economy", event.target.value)} />
@@ -1771,6 +1897,9 @@ function ApiSettingsPanel({
             : ([
                 { name: "OpenAI", status: "missing", message: settings.hasOpenAIKey ? "已保存，待测试" : "未配置 API Key" },
                 { name: "DeepSeek", status: "missing", message: settings.hasDeepSeekKey ? "已保存，待测试" : "未配置 API Key" },
+                { name: "OpenRouter", status: "missing", message: settings.hasOpenRouterKey ? "已保存，待测试" : "未配置 API Key" },
+                { name: "SiliconFlow", status: "missing", message: settings.hasSiliconFlowKey ? "已保存，待测试" : "未配置 API Key" },
+                { name: "自定义兼容 API", status: "missing", message: settings.hasCustomApiKey ? "已保存，待测试" : "未配置 Base URL / Key" },
                 { name: "图片模型", status: "missing", message: settings.imageModel }
               ] as ApiTestResult[])
           ).map((item) => (

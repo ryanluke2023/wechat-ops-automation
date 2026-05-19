@@ -25,17 +25,29 @@ async function testEndpoint(name: string, url: string, apiKey: string) {
   }
 }
 
+function modelsUrl(baseUrl: string) {
+  return `${baseUrl.replace(/\/$/, "")}/models`;
+}
+
 export async function POST() {
   const settings = await readApiSettings();
-  const [openai, deepseek] = await Promise.all([
+  const [openai, deepseek, openrouter, siliconflow, custom] = await Promise.all([
     testEndpoint("OpenAI", "https://api.openai.com/v1/models", settings.openAIKey),
-    testEndpoint("DeepSeek", "https://api.deepseek.com/models", settings.deepSeekKey)
+    testEndpoint("DeepSeek", "https://api.deepseek.com/models", settings.deepSeekKey),
+    testEndpoint("OpenRouter", modelsUrl(settings.openRouterBaseUrl), settings.openRouterKey),
+    testEndpoint("SiliconFlow", modelsUrl(settings.siliconFlowBaseUrl), settings.siliconFlowKey),
+    settings.customBaseUrl
+      ? testEndpoint("自定义兼容 API", modelsUrl(settings.customBaseUrl), settings.customApiKey)
+      : Promise.resolve({ name: "自定义兼容 API", status: "missing" as TestStatus, message: "未配置 Base URL" })
   ]);
 
   return NextResponse.json({
     results: [
       openai,
       deepseek,
+      openrouter,
+      siliconflow,
+      custom,
       {
         name: "图片模型",
         status: openai.status,
